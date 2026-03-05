@@ -1,0 +1,61 @@
+# CAMRIE Fargate Docker Image
+#
+# Full-featured image for AWS Fargate with Julia and KomaMRI.
+#
+# Build:
+#   docker build -f Dockerfile.fargate -t camrie:fargate .
+#
+# Run:
+#   docker run -v /path/to/data:/data camrie:fargate \
+#       camrie-sim --rho /data/rho.nii.gz --t1 /data/t1.nii.gz --normal 0 0 1
+
+FROM python:3.10-slim
+
+LABEL maintainer="CAMRIE Team"
+LABEL description="Cloud-Accelerated MRI Environment - Fargate Image"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    ca-certificates \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libxrender1 \
+    libxext6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Julia
+ENV JULIA_VERSION=1.10.0
+RUN curl -fsSL https://julialang-s3.julialang.org/bin/linux/x64/1.10/julia-${JULIA_VERSION}-linux-x86_64.tar.gz | \
+    tar -xz -C /opt && \
+    ln -s /opt/julia-${JULIA_VERSION}/bin/julia /usr/local/bin/julia
+
+# Add Julia to PATH
+ENV PATH="/opt/julia-${JULIA_VERSION}/bin:${PATH}"
+
+# Create app directory
+WORKDIR /app
+
+# Copy package files
+COPY pyproject.toml README.md ./
+COPY camrie/ ./camrie/
+
+# Install Python package
+RUN pip install --no-cache-dir -e .[interactive,cloud]
+
+# Install Julia packages
+RUN julia -e 'import Pkg; Pkg.add("KomaMRI"); Pkg.add("JSON"); Pkg.add("NPZ"); Pkg.precompile()'
+
+# Create data directory
+RUN mkdir -p /data /config
+
+# Set environment variables
+ENV CAMRIE_OUTPUT_DIR=/data/output
+ENV JULIA_NUM_THREADS=auto
+
+# Expose Streamlit port
+EXPOSE 8501
+
+# Default command
+CMD ["camrie-sim", "--help"]

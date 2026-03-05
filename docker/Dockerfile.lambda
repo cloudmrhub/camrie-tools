@@ -1,0 +1,48 @@
+# CAMRIE Lambda Docker Image
+#
+# Minimal image for AWS Lambda with container support.
+#
+# Build:
+#   docker build -f Dockerfile.lambda -t camrie:lambda .
+#
+# Note: AWS Lambda has a 10GB image size limit and 15 minute timeout.
+# For longer simulations, use Fargate.
+
+FROM public.ecr.aws/lambda/python:3.10
+
+LABEL maintainer="CAMRIE Team"
+LABEL description="Cloud-Accelerated MRI Environment - Lambda Image"
+
+# Install system dependencies
+RUN yum install -y \
+    tar \
+    gzip \
+    curl \
+    && yum clean all
+
+# Install Julia (minimal)
+ENV JULIA_VERSION=1.10.0
+RUN curl -fsSL https://julialang-s3.julialang.org/bin/linux/x64/1.10/julia-${JULIA_VERSION}-linux-x86_64.tar.gz | \
+    tar -xz -C /opt && \
+    ln -s /opt/julia-${JULIA_VERSION}/bin/julia /usr/local/bin/julia
+
+ENV PATH="/opt/julia-${JULIA_VERSION}/bin:${PATH}"
+
+# Copy package files
+COPY pyproject.toml README.md ${LAMBDA_TASK_ROOT}/
+COPY camrie/ ${LAMBDA_TASK_ROOT}/camrie/
+
+# Install Python package (minimal dependencies)
+RUN pip install --no-cache-dir numpy SimpleITK scipy
+
+# Install Julia packages
+RUN julia -e 'import Pkg; Pkg.add("KomaMRI"); Pkg.add("JSON"); Pkg.add("NPZ"); Pkg.precompile()'
+
+# Copy Lambda handler
+COPY docker/lambda_handler.py ${LAMBDA_TASK_ROOT}/
+
+# Set environment
+ENV JULIA_NUM_THREADS=auto
+
+# Lambda handler
+CMD ["lambda_handler.handler"]
