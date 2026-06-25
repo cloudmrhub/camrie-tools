@@ -7,3 +7,4 @@ __pycache__/
 .ruff_cache/
 build/
 dist/
+src/camrie_tools/__pycache__/

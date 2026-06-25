@@ -3,6 +3,22 @@
 Python tools for CAMRIE MRI reconstruction workflows using KomaMRI through
 `KomaInterface.jl`.
 
+## Citation
+
+This project is prepared for Zenodo archiving. After the Zenodo release is
+published, cite the archived release DOI shown by Zenodo.
+
+Authors:
+
+- Eros Montin, NYU Grossman School of Medicine
+- José E. Cruz Seralles, NYU Grossman School of Medicine
+- Steven Baete, NYU Grossman School of Medicine
+- Giuseppe Carluccio, University of Napoli Federico II
+- Riccardo Lattanzi, NYU Grossman School of Medicine
+
+Citation metadata is provided in [`CITATION.cff`](CITATION.cff) and
+[`.zenodo.json`](.zenodo.json).
+
 ## Requirements
 
 - Python 3.9 or newer

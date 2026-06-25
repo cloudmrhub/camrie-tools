@@ -1,0 +1,54 @@
+{
+  "title": "camrie-tools",
+  "upload_type": "software",
+  "description": "Python tools for CAMRIE MRI reconstruction workflows using KomaMRI through KomaInterface.jl.",
+  "creators": [
+    {
+      "name": "Montin, Eros",
+      "affiliation": "NYU Grossman School of Medicine"
+    },
+    {
+      "name": "Cruz Seralles, José E.",
+      "affiliation": "NYU Grossman School of Medicine"
+    },
+    {
+      "name": "Baete, Steven",
+      "affiliation": "NYU Grossman School of Medicine"
+    },
+    {
+      "name": "Carluccio, Giuseppe",
+      "affiliation": "University of Napoli Federico II"
+    },
+    {
+      "name": "Lattanzi, Riccardo",
+      "affiliation": "NYU Grossman School of Medicine"
+    }
+  ],
+  "keywords": [
+    "MRI",
+    "simulation",
+    "reconstruction",
+    "KomaMRI",
+    "CAMRIE"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/cloudmrhub/camrie-tools",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ],
+  "references": [
+    "IT'IS Foundation. Tissue properties database v5.0, 2025. https://itis.swiss/virtual-population/tissue-properties/downloads/database-v5-0.",
+    "IXI Dataset. IXI - Information eXtraction from Images. https://brain-development.org/ixi-dataset/. Accessed 2025.",
+    "Montin, E., Belfatto, A., Bologna, M., Meroni, S., Cavatorta, C., Pecori, E., Arrigoni, F., Poggi, G., Peruzzo, D., Pignoli, E., Gandola, L., and Mainardi, L. A multi-metric registration strategy for the alignment of longitudinal brain images in pediatric oncology. Medical & Biological Engineering & Computing, 58(4):843-855, 2020. doi:10.1007/s11517-019-02109-4.",
+    "Carluccio, G., Montin, E., and Lattanzi, R. Patient-specific body model construction for SAR and temperature estimation using deformable registration. Proceedings of the International Society for Magnetic Resonance in Medicine, 2023. Abstract.",
+    "Montin, E., Carluccio, G., Collins, C. M., and Lattanzi, R. Tuning and validation of an image registration procedure for patient-specific SAR simulation. Proceedings of the International Society for Magnetic Resonance in Medicine, 2024. Abstract 0610.",
+    "Migliori, S., Chiastra, C., Bologna, M., Montin, E., Dubini, G., Aurigemma, C., Fedele, R., Burzotta, F., Mainardi, L., and Migliavacca, F. A framework for computational fluid dynamic analyses of patient-specific stented coronary arteries from optical coherence tomography images. Medical Engineering and Physics, 47:105-116, 2017. doi:10.1016/j.medengphy.2017.06.027.",
+    "Migliori, S., Rampat, R., Bologna, M., Montin, E., Burzotta, F., Hildick-Smith, D., Dubini, G., Mainardi, L., Migliavacca, F., Cockburn, J., and Chiastra, C. A patient-specific study investigating the relation between coronary hemodynamics and neo-intimal thickening after bifurcation stenting with a polymeric bioresorbable scaffold. Applied Sciences, 8(9):1510, 2018. doi:10.3390/app8091510.",
+    "Montin, E., Nguyen, X. T., and Lattanzi, R. MR Optimum: A web-based open-source tool for standardized signal-to-noise ratio evaluation in MRI. Computer Methods and Programs in Biomedicine Update, 9:100235, 2026. doi:10.1016/j.cmpbup.2026.100235.",
+    "Montin, E. and Lattanzi, R. Seeking a widely adoptable practical standard to estimate signal-to-noise ratio in magnetic resonance imaging for multiple-coil reconstructions. Journal of Magnetic Resonance Imaging, 54(6):1952-1964, 2021. doi:10.1002/jmri.27816.",
+    "Zubal, I. G., Harrell, C. R., Smith, E. O., Rattner, Z., Gindi, G., and Hoffer, P. B. Computerized three-dimensional segmented human anatomy. Medical Physics, 21(2):299-302, 1994. doi:10.1118/1.597290.",
+    "Serrallés, J. E. C., Giannakopoulos, I. I., Zhang, B., Ianniello, C., Cloos, M. A., Polimeridis, A. G., White, J. K., Sodickson, D. K., Daniel, L., and Lattanzi, R. Noninvasive estimation of electrical properties from magnetic resonance measurements via global Maxwell tomography and match regularization. IEEE Transactions on Biomedical Engineering, 67(1):3-15, 2020. doi:10.1109/TBME.2019.2907442."
+  ]
+}
