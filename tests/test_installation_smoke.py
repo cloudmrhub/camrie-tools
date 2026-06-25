@@ -124,6 +124,32 @@ class InstallationSmokeTests(unittest.TestCase):
             with mock.patch.object(_installation_check, "_run_julia_check", return_value=completed):
                 self.assertEqual(_installation_check.main(), 0)
 
+    def test_circular_phantom_reconstruction_smoke(self) -> None:
+        if os.environ.get("CAMRIE_RUN_RECON_SMOKE", "").strip().lower() not in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            self.skipTest(
+                "Set CAMRIE_RUN_RECON_SMOKE=1 to run the Julia reconstruction smoke test."
+            )
+
+        from camrie_tools._reconstruction_smoke import run_reconstruction_smoke
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            summary = run_reconstruction_smoke(
+                output_dir=tmpdir,
+                grid_size=11,
+                radius_mm=45.0,
+                n_threads=1,
+            )
+
+            self.assertGreater(summary["spin_count"], 0)
+            self.assertEqual(summary["reconstruction_shape"], [128, 128])
+            self.assertGreater(summary["peak"], 0.0)
+            self.assertGreater(summary["total_signal"], 0.0)
+
     def test_bundled_nifti_data_loads_and_is_consistent(self) -> None:
         self._require_full_mode()
         self._require_modules("SimpleITK")

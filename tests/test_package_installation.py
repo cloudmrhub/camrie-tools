@@ -24,6 +24,10 @@ class CamrieToolsInstallationTests(unittest.TestCase):
         self.assertTrue(simulate_batch.exists())
         self.assertEqual(simulate_batch.name, "simulate_batch.jl")
 
+        sequence = Path(camrie_tools.sequence_path())
+        self.assertTrue(sequence.exists())
+        self.assertEqual(sequence.suffix, ".seq")
+
     def test_julia_installer_command_shape(self) -> None:
         from camrie_tools._julia import build_julia_command
 
@@ -58,6 +62,17 @@ class CamrieToolsInstallationTests(unittest.TestCase):
         self.assertIn("[DEFINITIONS]", EXAMPLE_SEQUENCE)
         self.assertIn("[ADC]", EXAMPLE_SEQUENCE)
         self.assertIn("FOV 0.220 0.180 0.005", EXAMPLE_SEQUENCE)
+
+    def test_circular_reconstruction_smoke_phantom_shape(self) -> None:
+        from camrie_tools._reconstruction_smoke import create_circular_phantom
+
+        phantom = create_circular_phantom(grid_size=11, radius_mm=45.0)
+
+        self.assertGreater(len(phantom["rho"]), 0)
+        self.assertEqual(len(phantom["x"]), len(phantom["rho"]))
+        self.assertEqual(len(phantom["y"]), len(phantom["rho"]))
+        self.assertEqual(len(phantom["z"]), len(phantom["rho"]))
+        self.assertEqual(phantom["name"], "circular_smoke_phantom")
 
 
 if __name__ == "__main__":

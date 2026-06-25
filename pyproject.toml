@@ -26,6 +26,7 @@ camrie-koma-pipeline = "camrie_tools.MRI_pipeline:main"
 camrie-install-julia = "camrie_tools._julia:main"
 camrie-test-installation = "camrie_tools._installation_check:main"
 camrie-example = "camrie_tools._example:main"
+camrie-reconstruction-smoke = "camrie_tools._reconstruction_smoke:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -36,4 +37,4 @@ where = ["src"]
 include = ["camrie_tools*"]
 
 [tool.setuptools.package-data]
-camrie_tools = ["simulate_batch.jl"]
+camrie_tools = ["simulate_batch.jl", "sequences/*"]

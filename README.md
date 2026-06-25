@@ -102,6 +102,33 @@ Parsed example sequence:
   FOV mm: [220.0, 180.0]
 ```
 
+## Reconstruction Smoke Test
+
+Run a small end-to-end reconstruction smoke test:
+
+```bash
+camrie-reconstruction-smoke
+```
+
+This creates a circular spin phantom, simulates the bundled
+`T1-Weighted_Spin_Echo.seq` sequence with KomaInterface/KomaMRI, reconstructs
+the k-space, and writes outputs to a temporary directory. Expected output
+includes:
+
+```text
+CAMRIE reconstruction smoke test passed.
+k-space shape: [128, 256]
+reconstruction shape: [128, 128]
+```
+
+To keep automated test runs quick, the real Julia reconstruction smoke test is
+opt-in:
+
+```bash
+CAMRIE_RUN_RECON_SMOKE=1 PYTHONPATH=src python -m unittest \
+  tests.test_installation_smoke.InstallationSmokeTests.test_circular_phantom_reconstruction_smoke
+```
+
 ## Google Colab
 
 The notebook entry point is:
@@ -127,18 +154,25 @@ os.environ["PATH"] = f"{os.path.expanduser('~')}/.juliaup/bin:" + os.environ["PA
 
 Install `camrie-tools` and the full Julia dependency stack:
 
+```python
+%pip install git+https://github.com/cloudmrhub/camrie-tools@v1
+```
+
 ```bash
-!pip install git+https://github.com/cloudmrhub/camrie-tools
 !camrie-install-julia --repository-url https://github.com/cloudmrhub/KomaInterface.jl.git
 ```
 
 Use HTTPS in Colab unless you have configured GitHub SSH keys in the notebook.
-Then verify the installation and run the example:
+Then verify the installation and run the lightweight example:
 
 ```bash
 !camrie-test-installation
 !camrie-example
 ```
+
+The notebook then runs the reconstruction smoke test from Python, loads
+`reconstruction_magnitude.npy`, and displays the circular phantom
+reconstruction inline with Matplotlib.
 
 ## Developer Smoke Tests
 
