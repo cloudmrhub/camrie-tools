@@ -33,14 +33,15 @@ The Julia installer installs both:
 - `KomaInterface.jl`
 - `CUDA.jl`
 
-The SSH-style GitHub URL is normalized automatically for Julia. If you prefer
-HTTPS, this is also supported:
+To override the KomaInterface repository or branch:
 
 ```bash
 camrie-install-julia \
   --repository-url https://github.com/cloudmrhub/KomaInterface.jl.git \
   --branch master
 ```
+
+SSH-style GitHub URLs are also supported and normalized automatically for Julia.
 
 To install Julia packages into a dedicated depot:
 
@@ -159,10 +160,9 @@ Install `camrie-tools` and the full Julia dependency stack:
 ```
 
 ```bash
-!camrie-install-julia --repository-url https://github.com/cloudmrhub/KomaInterface.jl.git
+!camrie-install-julia
 ```
 
-Use HTTPS in Colab unless you have configured GitHub SSH keys in the notebook.
 Then verify the installation and run the lightweight example:
 
 ```bash

@@ -1,0 +1,237 @@
+cff-version: 1.2.0
+message: "If you use camrie-tools, please cite the archived Zenodo release."
+title: "camrie-tools"
+type: software
+version: "0.1.0"
+authors:
+  - family-names: Montin
+    given-names: Eros
+    affiliation: NYU Grossman School of Medicine
+  - family-names: Cruz Seralles
+    given-names: "José E."
+    affiliation: NYU Grossman School of Medicine
+  - family-names: Baete
+    given-names: Steven
+    affiliation: NYU Grossman School of Medicine
+  - family-names: Carluccio
+    given-names: Giuseppe
+    affiliation: University of Napoli Federico II
+  - family-names: Lattanzi
+    given-names: Riccardo
+    affiliation: NYU Grossman School of Medicine
+repository-code: "https://github.com/cloudmrhub/camrie-tools"
+abstract: "Python tools for CAMRIE MRI reconstruction workflows using KomaMRI through KomaInterface.jl."
+references:
+  - type: data
+    authors:
+      - name: "IT'IS Foundation"
+    title: "Tissue properties database v5.0"
+    year: 2025
+    url: "https://itis.swiss/virtual-population/tissue-properties/downloads/database-v5-0"
+  - type: data
+    title: "IXI Dataset: Information eXtraction from Images"
+    url: "https://brain-development.org/ixi-dataset/"
+    notes: "Accessed 2025."
+  - type: article
+    authors:
+      - family-names: Montin
+        given-names: Eros
+      - family-names: Belfatto
+        given-names: Antonella
+      - family-names: Bologna
+        given-names: Marco
+      - family-names: Meroni
+        given-names: Silvia
+      - family-names: Cavatorta
+        given-names: Chiara
+      - family-names: Pecori
+        given-names: Enrico
+      - family-names: Arrigoni
+        given-names: Filippo
+      - family-names: Poggi
+        given-names: Geraldina
+      - family-names: Peruzzo
+        given-names: Denis
+      - family-names: Pignoli
+        given-names: Emanuele
+      - family-names: Gandola
+        given-names: Lorenza
+      - family-names: Mainardi
+        given-names: Luca
+    title: "A multi-metric registration strategy for the alignment of longitudinal brain images in pediatric oncology"
+    journal: "Medical & Biological Engineering & Computing"
+    year: 2020
+    volume: 58
+    issue: 4
+    start: 843
+    end: 855
+    doi: "10.1007/s11517-019-02109-4"
+  - type: conference-paper
+    authors:
+      - family-names: Carluccio
+        given-names: Giuseppe
+      - family-names: Montin
+        given-names: Eros
+      - family-names: Lattanzi
+        given-names: Riccardo
+    title: "Patient-specific body model construction for SAR and temperature estimation using deformable registration"
+    conference:
+      name: "Proceedings of the International Society for Magnetic Resonance in Medicine"
+    year: 2023
+    notes: "Abstract."
+  - type: conference-paper
+    authors:
+      - family-names: Montin
+        given-names: Eros
+      - family-names: Carluccio
+        given-names: Giuseppe
+      - family-names: Collins
+        given-names: "Christopher M."
+      - family-names: Lattanzi
+        given-names: Riccardo
+    title: "Tuning and validation of an image registration procedure for patient-specific SAR simulation"
+    conference:
+      name: "Proceedings of the International Society for Magnetic Resonance in Medicine"
+    year: 2024
+    notes: "Abstract 0610."
+  - type: article
+    authors:
+      - family-names: Migliori
+        given-names: Susanna
+      - family-names: Chiastra
+        given-names: Claudio
+      - family-names: Bologna
+        given-names: Marco
+      - family-names: Montin
+        given-names: Eros
+      - family-names: Dubini
+        given-names: Gabriele
+      - family-names: Aurigemma
+        given-names: Cristina
+      - family-names: Fedele
+        given-names: Roberto
+      - family-names: Burzotta
+        given-names: Francesco
+      - family-names: Mainardi
+        given-names: Luca
+      - family-names: Migliavacca
+        given-names: Francesco
+    title: "A framework for computational fluid dynamic analyses of patient-specific stented coronary arteries from optical coherence tomography images"
+    journal: "Medical Engineering and Physics"
+    year: 2017
+    volume: 47
+    start: 105
+    end: 116
+    doi: "10.1016/j.medengphy.2017.06.027"
+  - type: article
+    authors:
+      - family-names: Migliori
+        given-names: Susanna
+      - family-names: Rampat
+        given-names: Rajiv
+      - family-names: Bologna
+        given-names: Marco
+      - family-names: Montin
+        given-names: Eros
+      - family-names: Burzotta
+        given-names: Francesco
+      - family-names: Hildick-Smith
+        given-names: David
+      - family-names: Dubini
+        given-names: Gabriele
+      - family-names: Mainardi
+        given-names: Luca
+      - family-names: Migliavacca
+        given-names: Francesco
+      - family-names: Cockburn
+        given-names: James
+      - family-names: Chiastra
+        given-names: Claudio
+    title: "A patient-specific study investigating the relation between coronary hemodynamics and neo-intimal thickening after bifurcation stenting with a polymeric bioresorbable scaffold"
+    journal: "Applied Sciences"
+    year: 2018
+    volume: 8
+    issue: 9
+    doi: "10.3390/app8091510"
+  - type: article
+    authors:
+      - family-names: Montin
+        given-names: Eros
+      - family-names: Nguyen
+        given-names: "Xuan Thao"
+      - family-names: Lattanzi
+        given-names: Riccardo
+    title: "MR Optimum: A web-based open-source tool for standardized signal-to-noise ratio evaluation in MRI"
+    journal: "Computer Methods and Programs in Biomedicine Update"
+    year: 2026
+    volume: 9
+    doi: "10.1016/j.cmpbup.2026.100235"
+    url: "http://dx.doi.org/10.1016/j.cmpbup.2026.100235"
+  - type: article
+    authors:
+      - family-names: Montin
+        given-names: Eros
+      - family-names: Lattanzi
+        given-names: Riccardo
+    title: "Seeking a widely adoptable practical standard to estimate signal-to-noise ratio in magnetic resonance imaging for multiple-coil reconstructions"
+    journal: "Journal of Magnetic Resonance Imaging"
+    year: 2021
+    volume: 54
+    issue: 6
+    start: 1952
+    end: 1964
+    doi: "10.1002/jmri.27816"
+    url: "http://dx.doi.org/10.1002/jmri.27816"
+  - type: article
+    authors:
+      - family-names: Zubal
+        given-names: "I. George"
+      - family-names: Harrell
+        given-names: "Charles R."
+      - family-names: Smith
+        given-names: "Eileen O."
+      - family-names: Rattner
+        given-names: Zachary
+      - family-names: Gindi
+        given-names: Gene
+      - family-names: Hoffer
+        given-names: "Paul B."
+    title: "Computerized three-dimensional segmented human anatomy"
+    journal: "Medical Physics"
+    year: 1994
+    volume: 21
+    issue: 2
+    start: 299
+    end: 302
+    doi: "10.1118/1.597290"
+    url: "http://dx.doi.org/10.1118/1.597290"
+  - type: article
+    authors:
+      - family-names: Serrallés
+        given-names: "José E. C."
+      - family-names: Giannakopoulos
+        given-names: "Ilias I."
+      - family-names: Zhang
+        given-names: Bei
+      - family-names: Ianniello
+        given-names: Carlotta
+      - family-names: Cloos
+        given-names: "Martijn A."
+      - family-names: Polimeridis
+        given-names: "Athanasios G."
+      - family-names: White
+        given-names: "Jacob K."
+      - family-names: Sodickson
+        given-names: "Daniel K."
+      - family-names: Daniel
+        given-names: Luca
+      - family-names: Lattanzi
+        given-names: Riccardo
+    title: "Noninvasive estimation of electrical properties from magnetic resonance measurements via global Maxwell tomography and match regularization"
+    journal: "IEEE Transactions on Biomedical Engineering"
+    year: 2020
+    volume: 67
+    issue: 1
+    start: 3
+    end: 15
+    doi: "10.1109/TBME.2019.2907442"

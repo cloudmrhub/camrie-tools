@@ -102,7 +102,7 @@ class InstallationSmokeTests(unittest.TestCase):
 
         self.assertEqual(cmd[:2], ["julia", "-e"])
         self.assertIn(
-            'Pkg.PackageSpec(url="ssh://git@github.com/cloudmrhub/KomaInterface.jl.git", rev="master")',
+            'Pkg.PackageSpec(url="https://github.com/cloudmrhub/KomaInterface.jl.git", rev="master")',
             cmd[-1],
         )
         self.assertIn('Pkg.add(["CUDA"])', cmd[-1])

@@ -12,7 +12,7 @@ import sys
 from typing import Optional
 
 
-DEFAULT_REPOSITORY_URL = "git@github.com:cloudmrhub/KomaInterface.jl.git"
+DEFAULT_REPOSITORY_URL = "https://github.com/cloudmrhub/KomaInterface.jl.git"
 DEFAULT_BRANCH = "master"
 BASE_PACKAGES = ("KomaInterface",)
 GPU_PACKAGES = ("CUDA",)

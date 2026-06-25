@@ -35,14 +35,14 @@ class CamrieToolsInstallationTests(unittest.TestCase):
 
         self.assertEqual(command[:2], ["julia", "-e"])
         self.assertIn(
-            'Pkg.PackageSpec(url="ssh://git@github.com/cloudmrhub/KomaInterface.jl.git", rev="master")',
+            'Pkg.PackageSpec(url="https://github.com/cloudmrhub/KomaInterface.jl.git", rev="master")',
             command[-1],
         )
         self.assertIn('Pkg.add(["CUDA"])', command[-1])
         self.assertIn("Pkg.update()", command[-1])
         self.assertIn("Pkg.precompile()", command[-1])
 
-    def test_julia_installer_can_pin_komainterface_repository(self) -> None:
+    def test_julia_installer_normalizes_ssh_repository_urls(self) -> None:
         from camrie_tools._julia import build_julia_command
 
         command = build_julia_command(
