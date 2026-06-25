@@ -1,0 +1,3 @@
+[console_scripts]
+camrie-install-julia = camrie_tools._julia:main
+camrie-koma-pipeline = camrie_tools.MRI_pipeline:main

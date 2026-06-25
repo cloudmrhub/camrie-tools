@@ -1,5 +1,0 @@
-[console_scripts]
-camrie-notebook = camrie.cli:main_notebook
-camrie-setup = camrie.cli:main_setup
-camrie-sim = camrie.cli:main_simulation
-camrie-streamlit = camrie.cli:main_streamlit

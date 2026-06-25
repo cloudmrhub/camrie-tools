@@ -1,0 +1,334 @@
+Metadata-Version: 2.4
+Name: camrie-tools
+Version: 0.1.0
+Summary: Python tools for CAMRIE, including the Koma MRI simulation pipeline.
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: SimpleITK
+Requires-Dist: numpy
+Requires-Dist: vtk
+Requires-Dist: tqdm
+Requires-Dist: pypulseq
+Requires-Dist: matplotlib
+Provides-Extra: app
+Requires-Dist: streamlit; extra == "app"
+Requires-Dist: plotly; extra == "app"
+Provides-Extra: hdf5
+Requires-Dist: h5py; extra == "hdf5"
+
+# v2 MRI Pipeline Notes
+
+This document clarifies how spin density settings are interpreted in `v2/MRI_pipeline.py`.
+
+## Installation Smoke Test
+
+Use the bundled sample data in `data/` to verify your environment:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_installation_smoke.py' -v
+```
+
+## Body model spins vs sequence-space spins
+
+In this pipeline, spin placement is driven by the **simulation grid in sequence space**, then tissue values are interpolated from the body model.
+
+- The body model (`rho/t1/t2`) provides tissue properties in physical space.
+- The simulation grid is created from sequence resolution and `spin_factor`.
+- Optional sub-voxel expansion (`spins_per_voxel`) is applied per simulation grid cell.
+
+Because of this, it is more precise to talk about:
+- **sequence-space simulation spins**, or
+- **effective spins/mm^3**.
+
+## Effective spin density
+
+Let:
+- `dx = resolution_x / spin_factor`
+- `dy = resolution_y / spin_factor`
+- `dz = min(dx, dy)` when isotropic spin spacing is enabled (default)
+
+Then:
+
+```text
+effective_spins_per_mm3 = spins_per_voxel / (dx * dy * dz)
+```
+
+Notes:
+- `spins_per_voxel <= 1` means one spin per simulation grid point (no sub-voxel expansion).
+- `spins_per_voxel > 1` adds sub-spins around each grid point.
+
+## Practical example (1 mm model, 2 mm sequence)
+
+If sequence resolution is 2 mm and `spin_factor=1`:
+- simulation cell is about `2 x 2 x 2 = 8 mm^3`
+- `spins_per_voxel=9` gives about `9/8 = 1.125 spins/mm^3` (not 9 spins/mm^3)
+
+If you want about 9 spins/mm^3:
+- set `spin_factor=2` (so simulation grid becomes ~1 mm),
+- then set `spins_per_voxel=9`.
+
+## Spin placement method behavior
+
+- Supported methods:
+  - `stratified`
+  - `halton`
+  - `sobol`
+  - `poisson_disk`
+  - `sobol_rotated`
+  - `random`
+  - `adaptive_edge`
+  - `adaptive_rho`
+  - `importance_grad`
+  - `octree_adaptive`
+  - `voxel_center_boundary_refine`
+  - `source_voxel_sampling`
+
+- Method behavior:
+  - `stratified`: jittered grid, then exact downsampling to requested count.
+  - `halton`: quasi-random low-discrepancy sequence.
+  - `sobol`: low-discrepancy sequence (good convergence, power-of-2 generation under the hood).
+  - `poisson_disk`: blue-noise-like spacing using rejection sampling.
+  - `sobol_rotated`: Sobol pattern with per-voxel random in-plane rotation.
+  - `random`: pure uniform random sampling with independent per-voxel offsets (not one repeated global pattern).
+  - `adaptive_edge`: edge-biased support; broadened more near strong local gradients.
+  - `adaptive_rho`: rho-adaptive support; broadened more for higher local rho.
+  - `importance_grad`: gradient-weighted randomization (more boundary-biased where local gradients are stronger).
+  - `octree_adaptive`: octree-like multi-scale sampling (finer local support in stronger-gradient zones).
+  - `voxel_center_boundary_refine`: center-first points plus face/edge refinement.
+  - `source_voxel_sampling`: anchors points to nearest source voxel centers, then adds local jitter.
+
+## Multiple methods together
+
+You can pass one or more methods. If multiple are passed, spins are split across methods:
+
+```text
+spins_per_voxel_per_method = spins_per_voxel / N_methods
+```
+
+Implementation detail:
+- integer split is used (`//` with remainder distributed to earlier methods),
+- total spins per voxel still sums to `spins_per_voxel`.
+
+Examples:
+- `--spin-method halton`
+- `--spin-method stratified adaptive_edge`
+- `--spin-method halton,adaptive_rho`
+- `--spin-method poisson_disk`
+- `--spin-method source_voxel_sampling adaptive_edge`
+
+---
+
+## Coordinate system and image placement
+
+This section documents the full coordinate chain from body model → phantom
+extraction → simulation → k-space reconstruction → volume placement.
+Understanding this chain is critical to avoid misregistration between the
+reconstructed volume and the body model.
+
+### Body model space (physical space)
+
+The body models are NIfTI files with a potentially non-identity direction
+matrix.  For the Billie/Duke models:
+
+```
+Direction: [[ 1,  0,  0],
+             [ 0, -1,  0],
+             [ 0,  0, -1]]
+```
+
+This means voxel index `(i, j, k)` maps to physical position:
+```
+x = origin_x + i * spacing_x
+y = origin_y - j * spacing_y      ← note negative y!
+z = origin_z - k * spacing_z      ← note negative z!
+```
+
+### Sequence space
+
+A rotation matrix `R_body_to_seq` is built from the `--normal` argument
+(slice normal vector) in `build_rotation_matrix()`.  For axial slices
+(`--normal 0 0 1`) with the identity body model, `R = I`.
+
+Points in **body space** are transformed to **sequence space** by:
+```
+p_seq = R @ (p_body - isocenter)
+```
+
+And back:
+```
+p_body = R.T @ p_seq + isocenter
+```
+
+Phantom spins are extracted in sequence space (x = readout, y = phase,
+z = slice) and saved in **metres** for KomaMRI.
+
+### K-space layout and IFFT
+
+KomaMRI saves k-space as `K[p, f]` where:
+- `p` = phase-encode index (rows, 0 … Np−1)
+- `f` = frequency-encode / readout index (cols, 0 … Nf−1)
+
+After `ifftshift → ifft2 → fftshift`, each pixel `[p, f]` maps to
+sequence-space position:
+
+```
+x_seq = -FOV_x/2  +  f * (FOV_x / Nf)
+y_seq = -FOV_y/2  +  p * (FOV_y / Np)
+```
+
+Pixel `[0, 0]` is therefore at `(-FOV_x/2, -FOV_y/2)` in sequence space.
+
+### Readout polarity (fliplr)
+
+A **negative readout gradient** (Gx < 0, SDL / Siemens convention) scans
+k_x from +k_max → −k_max, reversing the IFFT x-axis.  This is corrected
+with `np.fliplr()`.  The polarity is auto-detected from the `.seq` file
+(`detected_ro_sign`).
+
+A **positive readout gradient** (standard SE/TSE sequences generated by
+the pipeline) requires **no fliplr**.
+
+### Spin-echo phase-axis reversal (flipud k-space)
+
+In a **spin echo (SE)** sequence the 180° refocusing pulse **negates the
+effective k_y** of each TR:
+
+```
+Physical phase-encode (TR 0):  GY = −k_y_max   (most negative)
+After 180° echo:   effective k_y = +k_y_max     (reversed to most POSITIVE)
+```
+
+KomaMRI stores profiles in **acquisition order**, so:
+
+* `K[0, :]` → effective k_y = **+k_y_max** (highest positive frequency)
+* `K[N-1, :]` → effective k_y = **−k_y_max**
+
+This is the **opposite** of what the IFFT expects (`K[0]` = −k_y_max).
+Without correction the reconstructed image is flipped in the phase direction
+(anterior ↔ posterior in an axial scan).
+
+**Fix:** apply `np.flipud()` to the **k-space matrix** *before* the IFFT.
+After this flip, `K[0, :]` = −k_y_max again, so pixel `[0,0]` truly maps
+to y = −FOV/2 — consistent with the DFT convention used by
+`place_slice_in_body`.
+
+> **Why not flipud the image after IFFT?**  Flipping the *image* (not the
+> k-space) reverses the row content but leaves the SimpleITK origin
+> untouched.  Origin still points to the *old* row 0, causing a full-FOV
+> placement displacement (~183 mm for a 300 mm FOV).
+
+**Auto-detection rule** (implemented in both sequence parsers):
+1. Count distinct RF event IDs in the first TR.  If > 1 → spin echo.
+2. Find the amplitude of the first phase-encode gradient (GY in the
+   pre-phaser block, before the first ADC, no RF).
+3. `flip_phase = is_spin_echo AND first_GY_amp < 0`
+
+| Sequence type | First GY | flip_phase | flipud applied? |
+|---|---|---|---|
+| Gradient echo (GE) | any | False | No |
+| SE / TSE, neg→pos PE | < 0 | **True** | **Yes** |
+| SE, pos→neg PE | > 0 | False | No |
+| EPI SE (pos first GY) | > 0 | False | No |
+
+**Manual override** (use when auto-detection is wrong):
+
+```bash
+--flip-phase        # force flipud correction ON
+--no-flip-phase     # force flipud correction OFF
+```
+
+### Volume placement (place_slice_in_body)
+
+`place_slice_in_body` sets the SimpleITK image:
+
+```
+spacing  = (FOV_x / Nx,  FOV_y / Ny,  slice_thickness)
+direction = R.T    ← maps sequence axes back to body space
+origin    = R.T @ [-FOV_x/2, -FOV_y/2, 0]  +  center_mm
+```
+
+The origin is at pixel `[0, 0]` which, after the IFFT, is at
+`(-FOV_x/2, -FOV_y/2, 0)` in sequence space — exactly matching
+the pixel-to-position mapping above.
+
+### ★ Critical rule: do NOT flipud before placement
+
+`np.flipud()` reverses the phase-encode row order without updating the
+origin.  This displaces the image by the full FOV in the phase direction
+(~180 mm for a 300 mm FOV).
+
+**Verified numerically on the Billie body model:**
+
+| Transform applied | y-error vs body model |
+|---|---|
+| No flip | **0.00 mm** |
+| flipud applied | 183.34 mm |
+
+The `flipud` is applied only for **PNG display** (radiological convention)
+inside `_post_process`, but the unflipped image is passed to
+`place_slice_in_body`.
+
+### Summary of transforms at each stage
+
+```
+k-space [Np × Nf]   (as saved by KomaMRI / Julia, acquisition order)
+  │
+  ├─ flipud(k-space)   if spin_echo AND first_GY < 0   (phase-axis correction)
+  │
+  ├─ Hamming window    (optional, applied to k-space)
+  │
+  ├─ ifftshift → ifft2 → fftshift   (2-D IFFT)
+  │
+  ├─ fliplr(image)     if Gx < 0   (readout-axis correction)
+  │
+  └─→ image [Np × Nf]   pixel[p,f] → seq (−FOV/2 + f·Δx, −FOV/2 + p·Δy)
+              │
+              ├─→ place_slice_in_body            ← PLACEMENT (no post-IFFT flipud)
+              │     origin = R.T @ [−FOV/2, −FOV/2, 0] + center_mm
+              │
+              └─→ PNG preview only               ← DISPLAY (flipud applied)
+```
+
+---
+
+## Export spins as VTK
+
+To save the extracted spin cloud per slice as VTK point data:
+
+```bash
+python v2/MRI_pipeline.py ... --save-spins-vtk
+```
+
+This writes files like:
+- `spins_000.vtk`
+- `spins_001.vtk`
+
+## Render VTK spins to PNG (debug)
+
+Use the helper script below to render spin clouds into a 2D debug image.
+Each point is drawn as a centered square footprint (default `5x5` pixels).
+The CLI accepts `--output` as the MRI pipeline output directory (same style as
+`MRI_pipeline.py`).
+
+```bash
+python v2/vtk_points_to_png.py \
+  --output /path/to/pipeline_output \
+  --seq /data/PROJECTS/makeitKOMA/se_t1w_2d_128.seq \
+  --num-slices 2 \
+  --weight rho \
+  --point-size 5 \
+  --png-dir /path/to/debug_png
+```
+
+You can also render selected slices only:
+
+```bash
+python v2/vtk_points_to_png.py \
+  --output /path/to/pipeline_output \
+  --seq /data/PROJECTS/makeitKOMA/se_t1w_2d_128.seq \
+  --slice-indices 0 3 7 \
+  --weight rho \
+  --point-size 7 \
+  --png-dir /path/to/debug_png
+```
+in the same output folder as `phantom_XXX.h5/json`.

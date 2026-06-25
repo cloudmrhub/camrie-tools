@@ -1,0 +1,13 @@
+SimpleITK
+numpy
+vtk
+tqdm
+pypulseq
+matplotlib
+
+[app]
+streamlit
+plotly
+
+[hdf5]
+h5py
