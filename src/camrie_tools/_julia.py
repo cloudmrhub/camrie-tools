@@ -114,14 +114,17 @@ def build_julia_command(
     repository_url: Optional[str] = DEFAULT_REPOSITORY_URL,
     branch: Optional[str] = DEFAULT_BRANCH,
     cpu: bool = False,
+    update: bool = False,
 ) -> list[str]:
     """Build the Julia subprocess command used for installation.
 
     The command activates a dedicated Julia project, adds the selected
     dependencies, instantiates the environment, and precompiles it.
 
-    It intentionally does not call ``Pkg.update()`` because an installer
-    should not update unrelated packages in an existing environment.
+    By default it does not call ``Pkg.update()`` because an installer should
+    not update unrelated packages in an existing environment. Pass
+    ``update=True`` for the development/release-maintenance path that refreshes
+    Julia packages before precompilation.
     """
     project_path = Path(project_dir).expanduser().resolve()
     normalized_url = _normalize_repository_url(repository_url)
@@ -136,6 +139,7 @@ def build_julia_command(
         "import Pkg",
         f"Pkg.activate({_julia_string(str(project_path))})",
         *package_commands,
+        *(["Pkg.update()"] if update else []),
         "Pkg.instantiate()",
         "Pkg.precompile()",
         'println("CAMRIE Julia dependencies installed successfully.")',
@@ -187,6 +191,7 @@ def _print_installation_summary(
     repository_url: Optional[str],
     branch: Optional[str],
     cpu: bool,
+    update: bool,
 ) -> None:
     """Print a human-readable installation summary."""
     mode = "CPU-only" if cpu else "GPU-capable"
@@ -201,6 +206,7 @@ def _print_installation_summary(
     print(f"Installation mode : {mode}")
     print(f"Julia project     : {project_dir}")
     print(f"Packages          : {', '.join(packages)}")
+    print(f"Update packages   : {'yes' if update else 'no'}")
 
     if repository_url is None:
         print("KomaInterface     : Julia General registry")
@@ -270,6 +276,7 @@ def install_julia_deps(
     install_dir: Optional[str] = None,
     project_dir: str | Path = DEFAULT_PROJECT_DIR,
     cpu: bool = False,
+    update: bool = False,
     verify: bool = True,
 ) -> int:
     """Install the Julia dependencies required by CAMRIE.
@@ -288,6 +295,9 @@ def install_julia_deps(
         Dedicated Julia project directory used by CAMRIE.
     cpu:
         If ``True``, do not explicitly install CUDA.jl.
+    update:
+        If ``True``, run ``Pkg.update()`` in the CAMRIE Julia project before
+        precompilation.
     verify:
         If ``True``, import the installed packages after installation.
     """
@@ -311,6 +321,7 @@ def install_julia_deps(
         repository_url=normalized_url,
         branch=branch,
         cpu=cpu,
+        update=update,
     )
 
     env = _build_environment(
@@ -323,6 +334,7 @@ def install_julia_deps(
         repository_url=normalized_url,
         branch=branch,
         cpu=cpu,
+        update=update,
     )
 
     print("\nInstalling Julia dependencies...")
@@ -442,6 +454,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--update",
+        action="store_true",
+        help=(
+            "Run Pkg.update() in the CAMRIE Julia project before precompiling. "
+            "Use this deliberately when refreshing to the latest Julia-side "
+            "dependencies."
+        ),
+    )
+
+    parser.add_argument(
         "--no-verify",
         action="store_true",
         help="Skip package import verification after installation.",
@@ -470,6 +492,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         install_dir=args.install_dir,
         project_dir=args.project_dir,
         cpu=args.cpu,
+        update=args.update,
         verify=not args.no_verify,
     )
 

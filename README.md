@@ -70,6 +70,23 @@ camrie-install-julia \
 
 SSH-style GitHub URLs are also supported and normalized automatically for Julia.
 
+To deliberately refresh the CAMRIE Julia project to the latest compatible
+Julia package versions, use `--update`:
+
+```bash
+camrie-install-julia --cpu --update
+```
+
+On GPU-capable systems:
+
+```bash
+camrie-install-julia --update
+```
+
+This runs `Pkg.update()` followed by `Pkg.precompile()` inside the dedicated
+CAMRIE Julia project. It is useful during release maintenance, but normal users
+should usually omit `--update` for a more stable install.
+
 To install Julia packages into a dedicated depot:
 
 ```bash
@@ -139,15 +156,65 @@ Run a small end-to-end reconstruction smoke test:
 camrie-reconstruction-smoke
 ```
 
-This creates a circular spin phantom, simulates the bundled
-`T1-Weighted_Spin_Echo.seq` sequence with KomaInterface/KomaMRI, reconstructs
-the k-space, and writes outputs to a temporary directory. Expected output
+This creates the same two-compartment concentric phantom used by the local
+CAMRIE smoke workflow, simulates the bundled `PD-Weighted_Spin_Echo.seq`
+sequence with KomaInterface/KomaMRI, reconstructs the k-space, and writes
+outputs to a temporary directory. Expected output
 includes:
 
 ```text
 CAMRIE reconstruction smoke test passed.
 k-space shape: [128, 256]
 reconstruction shape: [128, 128]
+Preview PNG: /tmp/.../reconstruction_preview.png
+```
+
+Open the printed `Preview PNG` path to inspect the reconstructed concentric
+phantom image.
+
+The default concentric phantom has two compartments:
+
+```text
+inner core: PD=1.0, T1=800 ms,  T2=60 ms
+outer ring: PD=0.8, T1=1200 ms, T2=80 ms
+```
+
+You can change the tissue values from the command line:
+
+```bash
+camrie-reconstruction-smoke \
+  --inner-pd 1.0 \
+  --inner-t1-ms 900 \
+  --inner-t2-ms 70 \
+  --outer-pd 0.7 \
+  --outer-t1-ms 1300 \
+  --outer-t2-ms 90
+```
+
+The CLI and Python API accept T1/T2 in milliseconds to match the phantom
+generator used by the CAMRIE application. The generated Koma phantom stores
+those values in seconds internally.
+
+The same values can be set from Python:
+
+```python
+from camrie_tools._reconstruction_smoke import run_reconstruction_smoke
+
+summary = run_reconstruction_smoke(
+    output_dir="/tmp/camrie_reconstruction_smoke",
+    inner_pd=1.0,
+    inner_t1_ms=900.0,
+    inner_t2_ms=70.0,
+    outer_pd=0.7,
+    outer_t1_ms=1300.0,
+    outer_t2_ms=90.0,
+)
+```
+
+For a faster low-level debugging phantom, use:
+
+```bash
+camrie-reconstruction-smoke --phantom circle --grid-size 31
 ```
 
 To keep automated test runs quick, the real Julia reconstruction smoke test is
@@ -155,7 +222,7 @@ opt-in:
 
 ```bash
 CAMRIE_RUN_RECON_SMOKE=1 PYTHONPATH=src python -m unittest \
-  tests.test_installation_smoke.InstallationSmokeTests.test_circular_phantom_reconstruction_smoke
+  tests.test_installation_smoke.InstallationSmokeTests.test_concentric_phantom_reconstruction_smoke
 ```
 
 ## Google Colab
@@ -199,7 +266,7 @@ Then verify the installation and run the lightweight example:
 ```
 
 The notebook then runs the reconstruction smoke test from Python, loads
-`reconstruction_magnitude.npy`, and displays the circular phantom
+`reconstruction_magnitude.npy`, and displays the concentric phantom
 reconstruction inline with Matplotlib.
 
 ## Developer Smoke Tests

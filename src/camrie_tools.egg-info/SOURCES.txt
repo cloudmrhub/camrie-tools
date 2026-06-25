@@ -14,6 +14,8 @@ src/camrie_tools.egg-info/dependency_links.txt
 src/camrie_tools.egg-info/entry_points.txt
 src/camrie_tools.egg-info/requires.txt
 src/camrie_tools.egg-info/top_level.txt
+src/camrie_tools/sequences/PD-Weighted_Spin_Echo.mtrk
+src/camrie_tools/sequences/PD-Weighted_Spin_Echo.seq
 src/camrie_tools/sequences/T1-Weighted_Spin_Echo.mtrk
 src/camrie_tools/sequences/T1-Weighted_Spin_Echo.seq
 tests/test_installation_smoke.py

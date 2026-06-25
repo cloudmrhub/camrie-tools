@@ -110,6 +110,7 @@ class InstallationSmokeTests(unittest.TestCase):
         self.assertIn("Pkg.activate", cmd[-1])
         self.assertIn("Pkg.instantiate()", cmd[-1])
         self.assertIn("Pkg.precompile()", cmd[-1])
+        self.assertNotIn("Pkg.update()", cmd[-1])
 
     def test_installation_checker_reports_success_when_dependencies_are_available(self) -> None:
         from unittest import mock
@@ -127,7 +128,7 @@ class InstallationSmokeTests(unittest.TestCase):
                 with mock.patch.object(_installation_check, "_run_julia_check", return_value=completed):
                     self.assertEqual(_installation_check.main(["--cpu"]), 0)
 
-    def test_circular_phantom_reconstruction_smoke(self) -> None:
+    def test_concentric_phantom_reconstruction_smoke(self) -> None:
         if os.environ.get("CAMRIE_RUN_RECON_SMOKE", "").strip().lower() not in {
             "1",
             "true",
@@ -144,14 +145,16 @@ class InstallationSmokeTests(unittest.TestCase):
             summary = run_reconstruction_smoke(
                 output_dir=tmpdir,
                 grid_size=11,
-                radius_mm=45.0,
+                phantom_kind="concentric",
                 n_threads=1,
             )
 
             self.assertGreater(summary["spin_count"], 0)
+            self.assertEqual(summary["phantom_kind"], "concentric")
             self.assertEqual(summary["reconstruction_shape"], [128, 128])
             self.assertGreater(summary["peak"], 0.0)
             self.assertGreater(summary["total_signal"], 0.0)
+            self.assertTrue(Path(summary["outputs"]["reconstruction_preview"]).exists())
 
     def test_bundled_nifti_data_loads_and_is_consistent(self) -> None:
         self._require_full_mode()

@@ -8,3 +8,4 @@ __pycache__/
 build/
 dist/
 src/camrie_tools/__pycache__/
+*.pyc

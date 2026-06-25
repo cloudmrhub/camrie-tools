@@ -12,7 +12,7 @@ def simulate_batch_path() -> str:
     return str(resources.files(__package__).joinpath("simulate_batch.jl"))
 
 
-def sequence_path(name: str = "T1-Weighted_Spin_Echo.seq") -> str:
+def sequence_path(name: str = "PD-Weighted_Spin_Echo.seq") -> str:
     """Return the installed path to a bundled pulse sequence file."""
     return str(resources.files(__package__).joinpath("sequences", name))
 
