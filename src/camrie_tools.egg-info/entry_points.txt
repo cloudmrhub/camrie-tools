@@ -1,3 +1,5 @@
 [console_scripts]
+camrie-example = camrie_tools._example:main
 camrie-install-julia = camrie_tools._julia:main
 camrie-koma-pipeline = camrie_tools.MRI_pipeline:main
+camrie-test-installation = camrie_tools._installation_check:main

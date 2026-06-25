@@ -24,6 +24,8 @@ hdf5 = ["h5py"]
 [project.scripts]
 camrie-koma-pipeline = "camrie_tools.MRI_pipeline:main"
 camrie-install-julia = "camrie_tools._julia:main"
+camrie-test-installation = "camrie_tools._installation_check:main"
+camrie-example = "camrie_tools._example:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -3,6 +3,8 @@ pyproject.toml
 src/MRI_pipeline.py
 src/camrie_tools/MRI_pipeline.py
 src/camrie_tools/__init__.py
+src/camrie_tools/_example.py
+src/camrie_tools/_installation_check.py
 src/camrie_tools/_julia.py
 src/camrie_tools/simulate_batch.jl
 src/camrie_tools.egg-info/PKG-INFO

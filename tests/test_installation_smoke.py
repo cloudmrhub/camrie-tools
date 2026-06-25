@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -97,14 +98,31 @@ class InstallationSmokeTests(unittest.TestCase):
     def test_julia_installer_command_adds_expected_packages(self) -> None:
         from camrie_tools._julia import build_julia_command
 
-        cpu_cmd = build_julia_command(gpu=False)
-        gpu_cmd = build_julia_command(gpu=True)
+        cmd = build_julia_command()
 
-        self.assertEqual(cpu_cmd[:2], ["julia", "-e"])
-        self.assertIn('Pkg.add(["KomaInterface"])', cpu_cmd[-1])
-        self.assertIn("Pkg.update()", cpu_cmd[-1])
-        self.assertIn("Pkg.precompile()", cpu_cmd[-1])
-        self.assertIn('Pkg.add(["KomaInterface", "CUDA"])', gpu_cmd[-1])
+        self.assertEqual(cmd[:2], ["julia", "-e"])
+        self.assertIn(
+            'Pkg.PackageSpec(url="ssh://git@github.com/cloudmrhub/KomaInterface.jl.git", rev="master")',
+            cmd[-1],
+        )
+        self.assertIn('Pkg.add(["CUDA"])', cmd[-1])
+        self.assertIn("Pkg.update()", cmd[-1])
+        self.assertIn("Pkg.precompile()", cmd[-1])
+
+    def test_installation_checker_reports_success_when_dependencies_are_available(self) -> None:
+        from unittest import mock
+
+        from camrie_tools import _installation_check
+
+        completed = subprocess.CompletedProcess(
+            ["julia", "-e", ""],
+            0,
+            stdout="Julia package OK\n",
+            stderr=None,
+        )
+        with mock.patch.object(_installation_check.shutil, "which", return_value="/usr/bin/julia"):
+            with mock.patch.object(_installation_check, "_run_julia_check", return_value=completed):
+                self.assertEqual(_installation_check.main(), 0)
 
     def test_bundled_nifti_data_loads_and_is_consistent(self) -> None:
         self._require_full_mode()

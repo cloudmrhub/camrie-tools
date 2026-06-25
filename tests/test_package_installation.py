@@ -27,8 +27,37 @@ class CamrieToolsInstallationTests(unittest.TestCase):
     def test_julia_installer_command_shape(self) -> None:
         from camrie_tools._julia import build_julia_command
 
-        self.assertIn('Pkg.add(["KomaInterface"])', build_julia_command(gpu=False)[-1])
-        self.assertIn('Pkg.add(["KomaInterface", "CUDA"])', build_julia_command(gpu=True)[-1])
+        command = build_julia_command()
+
+        self.assertEqual(command[:2], ["julia", "-e"])
+        self.assertIn(
+            'Pkg.PackageSpec(url="ssh://git@github.com/cloudmrhub/KomaInterface.jl.git", rev="master")',
+            command[-1],
+        )
+        self.assertIn('Pkg.add(["CUDA"])', command[-1])
+        self.assertIn("Pkg.update()", command[-1])
+        self.assertIn("Pkg.precompile()", command[-1])
+
+    def test_julia_installer_can_pin_komainterface_repository(self) -> None:
+        from camrie_tools._julia import build_julia_command
+
+        command = build_julia_command(
+            repository_url="git@github.com:cloudmrhub/KomaInterface.jl.git",
+            branch="master",
+        )
+
+        self.assertIn(
+            'Pkg.PackageSpec(url="ssh://git@github.com/cloudmrhub/KomaInterface.jl.git", rev="master")',
+            command[-1],
+        )
+        self.assertIn('Pkg.add(["CUDA"])', command[-1])
+
+    def test_packaged_example_sequence_is_parseable(self) -> None:
+        from camrie_tools._example import EXAMPLE_SEQUENCE
+
+        self.assertIn("[DEFINITIONS]", EXAMPLE_SEQUENCE)
+        self.assertIn("[ADC]", EXAMPLE_SEQUENCE)
+        self.assertIn("FOV 0.220 0.180 0.005", EXAMPLE_SEQUENCE)
 
 
 if __name__ == "__main__":

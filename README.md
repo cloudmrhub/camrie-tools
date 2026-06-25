@@ -1,21 +1,3 @@
-Metadata-Version: 2.4
-Name: camrie-tools
-Version: 0.1.0
-Summary: Python tools for CAMRIE, including the Koma MRI simulation pipeline.
-Requires-Python: >=3.9
-Description-Content-Type: text/markdown
-Requires-Dist: SimpleITK
-Requires-Dist: numpy
-Requires-Dist: vtk
-Requires-Dist: tqdm
-Requires-Dist: pypulseq
-Requires-Dist: matplotlib
-Provides-Extra: app
-Requires-Dist: streamlit; extra == "app"
-Requires-Dist: plotly; extra == "app"
-Provides-Extra: hdf5
-Requires-Dist: h5py; extra == "hdf5"
-
 # camrie-tools
 
 Python tools for CAMRIE MRI reconstruction workflows using KomaMRI through
