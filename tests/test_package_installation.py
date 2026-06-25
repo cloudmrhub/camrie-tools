@@ -31,21 +31,25 @@ class CamrieToolsInstallationTests(unittest.TestCase):
     def test_julia_installer_command_shape(self) -> None:
         from camrie_tools._julia import build_julia_command
 
-        command = build_julia_command()
+        command = build_julia_command(project_dir="/tmp/camrie-julia")
 
-        self.assertEqual(command[:2], ["julia", "-e"])
+        self.assertEqual(command[0], "julia")
+        self.assertIn("--project=/tmp/camrie-julia", command)
+        self.assertIn("--startup-file=no", command)
         self.assertIn(
             'Pkg.PackageSpec(url="https://github.com/cloudmrhub/KomaInterface.jl.git", rev="master")',
             command[-1],
         )
-        self.assertIn('Pkg.add(["CUDA"])', command[-1])
-        self.assertIn("Pkg.update()", command[-1])
+        self.assertIn('Pkg.add("CUDA")', command[-1])
+        self.assertIn("Pkg.activate", command[-1])
+        self.assertIn("Pkg.instantiate()", command[-1])
         self.assertIn("Pkg.precompile()", command[-1])
 
     def test_julia_installer_normalizes_ssh_repository_urls(self) -> None:
         from camrie_tools._julia import build_julia_command
 
         command = build_julia_command(
+            project_dir="/tmp/camrie-julia",
             repository_url="git@github.com:cloudmrhub/KomaInterface.jl.git",
             branch="master",
         )
@@ -54,7 +58,15 @@ class CamrieToolsInstallationTests(unittest.TestCase):
             'Pkg.PackageSpec(url="ssh://git@github.com/cloudmrhub/KomaInterface.jl.git", rev="master")',
             command[-1],
         )
-        self.assertIn('Pkg.add(["CUDA"])', command[-1])
+        self.assertIn('Pkg.add("CUDA")', command[-1])
+
+    def test_julia_installer_cpu_mode_skips_cuda(self) -> None:
+        from camrie_tools._julia import build_julia_command
+
+        command = build_julia_command(project_dir="/tmp/camrie-julia", cpu=True)
+
+        self.assertIn("KomaInterface.jl.git", command[-1])
+        self.assertNotIn("CUDA", command[-1])
 
     def test_packaged_example_sequence_is_parseable(self) -> None:
         from camrie_tools._example import EXAMPLE_SEQUENCE

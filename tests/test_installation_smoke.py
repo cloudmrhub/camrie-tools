@@ -98,15 +98,17 @@ class InstallationSmokeTests(unittest.TestCase):
     def test_julia_installer_command_adds_expected_packages(self) -> None:
         from camrie_tools._julia import build_julia_command
 
-        cmd = build_julia_command()
+        cmd = build_julia_command(project_dir="/tmp/camrie-julia")
 
-        self.assertEqual(cmd[:2], ["julia", "-e"])
+        self.assertEqual(cmd[0], "julia")
+        self.assertIn("--project=/tmp/camrie-julia", cmd)
         self.assertIn(
             'Pkg.PackageSpec(url="https://github.com/cloudmrhub/KomaInterface.jl.git", rev="master")',
             cmd[-1],
         )
-        self.assertIn('Pkg.add(["CUDA"])', cmd[-1])
-        self.assertIn("Pkg.update()", cmd[-1])
+        self.assertIn('Pkg.add("CUDA")', cmd[-1])
+        self.assertIn("Pkg.activate", cmd[-1])
+        self.assertIn("Pkg.instantiate()", cmd[-1])
         self.assertIn("Pkg.precompile()", cmd[-1])
 
     def test_installation_checker_reports_success_when_dependencies_are_available(self) -> None:
@@ -121,8 +123,9 @@ class InstallationSmokeTests(unittest.TestCase):
             stderr=None,
         )
         with mock.patch.object(_installation_check.shutil, "which", return_value="/usr/bin/julia"):
-            with mock.patch.object(_installation_check, "_run_julia_check", return_value=completed):
-                self.assertEqual(_installation_check.main(), 0)
+            with mock.patch.object(Path, "exists", return_value=True):
+                with mock.patch.object(_installation_check, "_run_julia_check", return_value=completed):
+                    self.assertEqual(_installation_check.main(["--cpu"]), 0)
 
     def test_circular_phantom_reconstruction_smoke(self) -> None:
         if os.environ.get("CAMRIE_RUN_RECON_SMOKE", "").strip().lower() not in {

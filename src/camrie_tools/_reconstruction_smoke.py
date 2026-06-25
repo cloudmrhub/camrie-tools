@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+
+
+DEFAULT_JULIA_PROJECT = Path.home() / ".camrie" / "julia"
 
 
 def create_circular_phantom(
@@ -56,8 +60,9 @@ def run_reconstruction_smoke(
     use_gpu: bool = False,
     b0: float = 1.5,
     n_threads: int = 2,
-    grid_size: int = 21,
+    grid_size: int = 151,
     radius_mm: float = 45.0,
+    julia_project: Optional[str] = None,
 ) -> dict[str, Any]:
     import camrie_tools
     from camrie_tools.MRI_pipeline import (
@@ -69,6 +74,22 @@ def run_reconstruction_smoke(
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+
+    project_path = Path(
+        julia_project
+        or os.environ.get("CAMRIE_JULIA_PROJECT")
+        or os.environ.get("JULIA_PROJECT")
+        or DEFAULT_JULIA_PROJECT
+    ).expanduser()
+    if not project_path.exists():
+        raise FileNotFoundError(
+            "The CAMRIE Julia project was not found.\n"
+            f"Expected project directory: {project_path}\n"
+            "Run `camrie-install-julia --cpu` on CPU-only systems, or "
+            "`camrie-install-julia` on CUDA-capable systems."
+        )
+    os.environ["CAMRIE_JULIA_PROJECT"] = str(project_path)
+    os.environ["JULIA_PROJECT"] = str(project_path)
 
     seq_path = Path(sequence_file or camrie_tools.sequence_path())
     params = read_pulseq_params(str(seq_path))
@@ -125,6 +146,7 @@ def run_reconstruction_smoke(
         "peak": peak,
         "total_signal": total_signal,
         "use_gpu": bool(use_gpu),
+        "julia_project": str(project_path),
         "info": info,
         "outputs": {
             "kspace": str(kspace_path),
@@ -145,8 +167,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--use-gpu", action="store_true", help="Use Koma/CUDA GPU simulation.")
     parser.add_argument("--b0", type=float, default=1.5, help="Main field strength in tesla.")
     parser.add_argument("--threads", type=int, default=2, help="Julia thread count.")
-    parser.add_argument("--grid-size", type=int, default=11, help="Circular phantom grid size.")
+    parser.add_argument("--grid-size", type=int, default=151, help="Circular phantom grid size.")
     parser.add_argument("--radius-mm", type=float, default=45.0, help="Circular phantom radius.")
+    parser.add_argument(
+        "--julia-project",
+        default=None,
+        help=f"CAMRIE Julia project directory. Default: {DEFAULT_JULIA_PROJECT}",
+    )
     args = parser.parse_args(argv)
 
     output_dir = args.output or tempfile.mkdtemp(prefix="camrie_recon_smoke_")
@@ -158,6 +185,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         n_threads=args.threads,
         grid_size=args.grid_size,
         radius_mm=args.radius_mm,
+        julia_project=args.julia_project,
     )
     print("CAMRIE reconstruction smoke test passed.")
     print(f"Output directory: {output_dir}")
@@ -165,6 +193,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"k-space shape: {summary['kspace_shape']}")
     print(f"reconstruction shape: {summary['reconstruction_shape']}")
     print(f"peak signal: {summary['peak']:.6g}")
+    print(f"Julia project: {summary['julia_project']}")
     return 0
 
 

@@ -25,9 +25,10 @@ Citation metadata is provided in [`CITATION.cff`](CITATION.cff) and
 - Julia installed and available on `PATH`
 - Git access to `cloudmrhub/KomaInterface.jl`
 
-CUDA support is installed as part of the standard Julia dependency stack. A
-machine without an NVIDIA GPU can still install the package; `CUDA.functional()`
-will report whether GPU execution is available at runtime.
+CPU installation is supported and is the safest option for Colab or machines
+without an NVIDIA GPU. GPU-capable installation additionally installs
+`CUDA.jl`; `CUDA.functional()` reports whether GPU execution is actually
+available at runtime.
 
 ## Install
 
@@ -38,15 +39,25 @@ python -m pip install -e .
 hash -r
 ```
 
-Install the full Julia dependency stack:
+Install the Julia dependency stack. For CPU-only systems or Colab runtimes
+without a GPU, use:
+
+```bash
+camrie-install-julia --cpu
+```
+
+For GPU-capable systems with NVIDIA CUDA available, use:
 
 ```bash
 camrie-install-julia
 ```
 
-The Julia installer installs both:
+Both modes install:
 
 - `KomaInterface.jl`
+
+The GPU-capable mode also installs:
+
 - `CUDA.jl`
 
 To override the KomaInterface repository or branch:
@@ -69,7 +80,7 @@ camrie-install-julia \
 Use that depot later with:
 
 ```bash
-JULIA_DEPOT_PATH=~/.julia-camrie camrie-test-installation
+JULIA_DEPOT_PATH=~/.julia-camrie camrie-test-installation --cpu
 ```
 
 ## Test The Installation
@@ -77,7 +88,7 @@ JULIA_DEPOT_PATH=~/.julia-camrie camrie-test-installation
 Run the packaged installation check:
 
 ```bash
-camrie-test-installation
+camrie-test-installation --cpu
 ```
 
 This verifies:
@@ -86,9 +97,10 @@ This verifies:
 - bundled Julia simulation script is present
 - Julia is available on `PATH`
 - `KomaInterface.jl` imports successfully
-- `CUDA.jl` imports successfully
+- `CUDA.jl` imports successfully unless `--cpu` is used
 
-On a machine without a GPU, the check can still pass. The output may include:
+On a GPU-capable install without a usable GPU, the check can still pass. The
+output may include:
 
 ```text
 CUDA functional: false
@@ -176,13 +188,13 @@ Install `camrie-tools` and the full Julia dependency stack:
 ```
 
 ```bash
-!camrie-install-julia
+!camrie-install-julia --cpu
 ```
 
 Then verify the installation and run the lightweight example:
 
 ```bash
-!camrie-test-installation
+!camrie-test-installation --cpu
 !camrie-example
 ```
 
