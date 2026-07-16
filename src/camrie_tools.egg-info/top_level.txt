@@ -1,2 +1,0 @@
-MRI_pipeline
-camrie_tools

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib import resources
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def simulate_batch_path() -> str:
