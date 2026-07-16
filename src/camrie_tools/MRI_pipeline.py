@@ -361,35 +361,192 @@ def _build_phase_reorder_from_ky(ky_trace: List[float]) -> Dict[str, Any]:
     meta["phase_reorder_reason"] = "non_monotonic_ky"
     return meta
 
-def read_mtrk_params(seq_path: str) -> Dict[str,Any]:
+# ─────────────────────────────────────────────────────────────────────────────
+# mtrk (SDL / YARRA) field-lookup helpers
+# ─────────────────────────────────────────────────────────────────────────────
+# The mtrk JSON format does not expose every acquisition parameter under a single
+# fixed key, and spellings vary between exporters.  The tuples below list the
+# accepted (case-insensitive) key names for each parameter, and the helpers below
+# resolve values robustly across the "infos"/"settings" maps and the per-object
+# definitions in "objects".
+
+# Phase-encode line count.  Primary key is "pelines"; accept common variants.
+_MTRK_PELINE_KEYS = (
+    "pelines", "pe_lines", "phaselines", "phase_lines", "phaseencodes", "nphase",
+)
+# Frequency-encode / readout sample count.  Mirrors the "pelines" naming pattern.
+# (Not present in "infos" for the reference sequences; kept for forward-compat.)
+_MTRK_FREQ_KEYS = (
+    "felines", "fe_lines", "freqlines", "freq_lines", "readout_points",
+    "readout_samples", "readoutsamples", "readout_lines", "readoutlines",
+    "nf", "samples",
+)
+# Field of view (mm).
+_MTRK_FOV_KEYS = ("fov", "field_of_view")
+# Slice thickness.
+_MTRK_ST_KEYS = (
+    "slice_thickness", "slicethickness", "slice_thickness_mm", "st", "thickness",
+)
+# Readout oversampling factor.
+_MTRK_OS_KEYS = ("readout_os", "readout_oversampling", "readoutos", "oversampling")
+
+
+def _mtrk_ci_get(mapping: Any, candidate_keys, default=None):
+    """Case-insensitive lookup of the first matching key in ``mapping``.
+
+    Returns ``default`` if ``mapping`` is not a dict or no candidate matches.
+    """
+    if not isinstance(mapping, dict):
+        return default
+    lowered = {str(k).lower(): v for k, v in mapping.items()}
+    for key in candidate_keys:
+        if str(key).lower() in lowered:
+            return lowered[str(key).lower()]
+    return default
+
+
+def _mtrk_iter_objects(seq: Dict[str, Any]):
+    """Yield (name, object_dict) for every entry in the mtrk ``objects`` map."""
+    objects = seq.get("objects", {})
+    if isinstance(objects, dict):
+        for name, obj in objects.items():
+            if isinstance(obj, dict):
+                yield name, obj
+
+
+def _mtrk_referenced_object_name(seq: Dict[str, Any], action: str):
+    """Name of the first object referenced by a step whose ``action`` matches.
+
+    mtrk instructions reference objects by name (e.g. an ``"action": "adc"`` step
+    points at the ADC object via ``"object"``), which is the most reliable way to
+    find the object actually used by the sequence.
+    """
+    instructions = seq.get("instructions", {})
+    if not isinstance(instructions, dict):
+        return None
+    for block in instructions.values():
+        if not isinstance(block, dict):
+            continue
+        for step in block.get("steps", []) or []:
+            if isinstance(step, dict) and step.get("action") == action:
+                name = step.get("object")
+                if name:
+                    return name
+    return None
+
+
+def _mtrk_find_adc_object(seq: Dict[str, Any]):
+    """Return the ADC object dict (preferring the one referenced by the sequence)."""
+    objects = seq.get("objects", {})
+    ref = _mtrk_referenced_object_name(seq, "adc")
+    if ref and isinstance(objects, dict) and isinstance(objects.get(ref), dict):
+        return objects[ref]
+    for _name, obj in _mtrk_iter_objects(seq):
+        if str(obj.get("type", "")).lower() == "adc":
+            return obj
+    return None
+
+
+def _mtrk_find_excitation_rf_object(seq: Dict[str, Any]):
+    """Return the excitation RF object dict, which carries the slice thickness.
+
+    Prefers ``purpose == "excitation"``; otherwise the first RF object exposing a
+    ``thickness`` field; otherwise any RF object.
+    """
+    rf_objs = [obj for _n, obj in _mtrk_iter_objects(seq)
+               if str(obj.get("type", "")).lower() == "rf"]
+    for obj in rf_objs:
+        if str(obj.get("purpose", "")).lower() == "excitation":
+            return obj
+    for obj in rf_objs:
+        if "thickness" in obj:
+            return obj
+    return rf_objs[0] if rf_objs else None
+
+
+def read_mtrk_params(seq_path: str) -> Dict[str, Any]:
     import json
     import numbers
-    seq = json.load(open(seq_path))
+
+    with open(seq_path) as fh:
+        seq = json.load(fh)
+
     if "infos" not in seq:
-        raise(KeyError(f"unable to find \"infos\" field in mtrk file \"{seq_path}\""))
+        raise KeyError(f'unable to find "infos" field in mtrk file "{seq_path}"')
     info = seq["infos"]
-    fov_mm = info.get("FOV",300)
-    if isinstance(fov_mm,numbers.Number):
-        fov_mm = [fov_mm,fov_mm]
-    elif hasattr(fov_mm,"len"):
-        if len(fov_mm) == 1:
-            fov_mm = [fov_mm[0],fov_mm[0]]
+    settings = seq.get("settings", {})
+
+    # ── FOV (mm) ──────────────────────────────────────────────────────────────
+    # mtrk stores FOV in mm under "fov" (case-insensitive); may be scalar or list.
+    fov_raw = _mtrk_ci_get(info, _MTRK_FOV_KEYS, 300)
+    if isinstance(fov_raw, numbers.Number):
+        fov_mm = [float(fov_raw), float(fov_raw)]
+    elif isinstance(fov_raw, (list, tuple, np.ndarray)):
+        fov_list = [float(v) for v in fov_raw]
+        if len(fov_list) == 0:
+            fov_mm = [300.0, 300.0]
+        elif len(fov_list) == 1:
+            fov_mm = [fov_list[0], fov_list[0]]
         else:
-            fov_mm = fov_mm[0:2]
+            fov_mm = fov_list[0:2]
     else:
-        raise(ValueError(f"error parsing fov_mm: {fov_mm}"))
+        raise ValueError(f"error parsing fov_mm: {fov_raw!r}")
+
+    # ── Readout oversampling ──────────────────────────────────────────────────
+    # Lives in "settings" (e.g. {"readout_os": 2}); accept spelling variants.
+    os_raw = _mtrk_ci_get(settings, _MTRK_OS_KEYS, None)
+    oversampling = int(os_raw) if isinstance(os_raw, numbers.Number) and int(os_raw) >= 1 else 1
+
+    # ── Phase-encode lines (nP) ───────────────────────────────────────────────
+    pelines_raw = _mtrk_ci_get(info, _MTRK_PELINE_KEYS, None)
+    nP = int(pelines_raw) if isinstance(pelines_raw, numbers.Number) and int(pelines_raw) > 0 else 128
+
+    # ── Frequency-encode samples (nF) ─────────────────────────────────────────
+    # Resolve the *final* (non-oversampled) readout matrix size, in priority order:
+    #   1) an explicit "infos" field (sibling of "pelines"; not present in the
+    #      reference sequences but supported for forward-compatibility),
+    #   2) the ADC object's "samples" count — where mtrk actually records the
+    #      readout length (confirmed by duration/dwelltime: samples*dwell==duration).
+    #      This is the base-resolution readout count; "readout_os" is applied on
+    #      top of it (nF_raw below), not baked into "samples".
+    #   3) the FOV aspect ratio as a last resort, since the freq-encode direction
+    #      corresponds to fov_mm[0]:  nF = round(nP * fov_mm[0] / fov_mm[1]).
+    nF = None
+    nF_source = None
+    freq_raw = _mtrk_ci_get(info, _MTRK_FREQ_KEYS, None)
+    if isinstance(freq_raw, numbers.Number) and int(freq_raw) > 0:
+        nF, nF_source = int(freq_raw), "infos"
+    if nF is None:
+        adc_obj = _mtrk_find_adc_object(seq)
+        samples = adc_obj.get("samples") if isinstance(adc_obj, dict) else None
+        if isinstance(samples, numbers.Number) and int(samples) > 0:
+            nF, nF_source = int(samples), "adc.samples"
+    if nF is None:
+        if fov_mm[1] > 0:
+            nF = max(1, int(round(nP * fov_mm[0] / fov_mm[1])))
+        else:
+            nF = nP
+        nF_source = "fov_aspect"
+
+    nF_raw = oversampling * nF
+
+    # ── Slice thickness (mm) ──────────────────────────────────────────────────
+    # The reference mtrk format does not carry slice thickness in "infos" or
+    # "settings"; it lives on the excitation RF object as "thickness" (already mm).
+    # Check the documented locations first, then fall back to the RF object.
     seq_slice_thickness_mm = None
-    if "settings" in seq and "readout_os" in seq["settings"] and isinstance(seq["settings"]["readout_os"],int):
-        oversampling = seq["settings"]["readout_os"]
+    st_raw = _mtrk_ci_get(info, _MTRK_ST_KEYS, None)
+    if st_raw is None:
+        st_raw = _mtrk_ci_get(settings, _MTRK_ST_KEYS, None)
+    if st_raw is None:
+        rf_obj = _mtrk_find_excitation_rf_object(seq)
+        if isinstance(rf_obj, dict):
+            st_raw = rf_obj.get("thickness")
+    if isinstance(st_raw, numbers.Number) and float(st_raw) > 0:
+        seq_slice_thickness_mm = float(st_raw)  # mtrk RF thickness is in mm
     else:
-        oversampling = 1
-    
-    if "infos" in seq and "pelines" in seq["infos"] and isinstance(seq["infos"]["pelines"],int):
-        nP = seq["infos"]["pelines"]
-    else:
-        nP = 128
-    nF_raw = oversampling*nP
-    nF = nP
+        print("mtrk: slice_thickness_mm not found in sequence file; "
+              "caller must provide via geometry")
 
     detected_ro_sign = -1
     flip_phase = False
@@ -415,11 +572,13 @@ def read_mtrk_params(seq_path: str) -> Dict[str,Any]:
             "phase_reorder_reason": phase_reorder_reason
         },
     }
-    print(f"Sequence: nF_raw={nF_raw}, nF={nF}, nP={nP}, "
+    st_str = f"{seq_slice_thickness_mm:.1f}" if seq_slice_thickness_mm is not None else "None"
+    print(f"Sequence: nF_raw={nF_raw}, nF={nF} (from {nF_source}), nP={nP}, "
             f"OS={oversampling}x, FOV={fov_mm[0]:.0f}x{fov_mm[1]:.0f}mm, "
+            f"ST={st_str}mm, "
             f"Gx_sign={detected_ro_sign:+d}, flip_phase={flip_phase}, "
             f"resort_ky={needs_resort} ({phase_reorder_reason})")
-    
+
     return params
 
 def read_pulseq_params(seq_path: str) -> Dict[str, Any]:
