@@ -361,6 +361,59 @@ def _build_phase_reorder_from_ky(ky_trace: List[float]) -> Dict[str, Any]:
     meta["phase_reorder_reason"] = "non_monotonic_ky"
     return meta
 
+
+def _rf_flip_angle_deg(rf) -> Optional[float]:
+    """Flip angle of a pypulseq RF event, in degrees.
+
+    Prefers rf.flip_angle, falling back to integrating the waveform, because
+    some pypulseq versions do not expose flip_angle. Signal is in Hz, so
+    FA[rad] = 2*pi * sum(|signal|) * dt.
+    """
+    fa = getattr(rf, "flip_angle", None)
+    if fa is not None:
+        try:
+            return float(np.rad2deg(float(fa)))
+        except Exception:
+            pass
+    sig = getattr(rf, "signal", None)
+    tt = getattr(rf, "t", None)
+    if sig is None or tt is None:
+        return None
+    sig = np.atleast_1d(np.asarray(sig, dtype=complex))
+    tt = np.atleast_1d(np.asarray(tt, dtype=float))
+    if sig.size < 2 or tt.size < 2:
+        return None
+    dt = float(np.median(np.diff(tt)))
+    if not np.isfinite(dt) or dt <= 0:
+        return None
+    return float(np.rad2deg(2 * np.pi * float(np.sum(np.abs(sig))) * dt))
+
+
+def _classify_rf_flip_angles(seq) -> Tuple[Optional[float], Optional[float]]:
+    """Return (excitation_fa, refocusing_fa) in degrees, either may be None.
+
+    Refocusing pulses are identified as a distinctly larger flip angle than the
+    excitation (e.g. 90/180). A single flip angle means no refocusing pulses,
+    which is the gradient-echo case.
+    """
+    angles = []
+    for idx in range(1, len(seq.block_events) + 1):
+        try:
+            blk = seq.get_block(idx)
+        except Exception:
+            continue
+        rf = getattr(blk, "rf", None)
+        if rf is not None:
+            fa = _rf_flip_angle_deg(rf)
+            if fa is not None and np.isfinite(fa):
+                angles.append(round(float(fa), 1))
+    if not angles:
+        return None, None
+    distinct = sorted(set(angles))
+    exc = distinct[0]
+    refoc = distinct[-1] if len(distinct) > 1 and distinct[-1] > 1.5 * exc else None
+    return exc, refoc
+
 # ─────────────────────────────────────────────────────────────────────────────
 # mtrk (SDL / YARRA) field-lookup helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -549,7 +602,28 @@ def read_mtrk_params(seq_path: str) -> Dict[str, Any]:
               "caller must provide via geometry")
 
     detected_ro_sign = -1
-    flip_phase = False
+    # flip_phase was hardcoded False, which produced phase-encode-FLIPPED images.
+    # Measured against a chiral (right-triangle) phantom by correlating the
+    # assembled reconstruction against the input rho on the same body grid:
+    #   PD-Weighted_Spin_Echo.mtrk  identity 0.485 vs flipud 0.956 -> needs True
+    #   T1-Weighted_Spin_Echo.mtrk  identity 0.433 vs flipud 0.933 -> needs True
+    #   T2-Weighted_Spin_Echo.mtrk  identity 0.419 vs flipud 0.904 -> needs True
+    # and confirmed directly via flip_phase_override on the T1 file (0.9329
+    # correct vs 0.4329 flipped). The matching .seq files all report True and all
+    # reconstruct correctly, so True is consistent across both readers for the
+    # same physical sequences.
+    #
+    # This is an EMPIRICAL value, not derived from the file. Deriving it from the
+    # phase-encoding equation was attempted and failed: the equation is a scale
+    # factor on a gradient array, and eq(0)*sum(array) predicts False for files
+    # that demonstrably need True, so at least one polarity in the mtrk 'phase'
+    # logical-axis -> Koma gy chain is still unaccounted for.
+    #
+    # NOT VALIDATED FOR: mtrk_spoiled_gre.mtrk, which matches no simple flip
+    # (best correlation 0.43) and uses a different equation style; and
+    # T1-Weighted_Spoiled_GRE.mtrk, which cannot be simulated at all because of
+    # the KomaInterface mtrk binning crash.
+    flip_phase = True
     needs_resort = False
     phase_reorder_reason = "already_monotonic"
 
@@ -564,7 +638,7 @@ def read_mtrk_params(seq_path: str) -> Dict[str, Any]:
         "te_eff_ms": None,
         "orientation": {
             "detected_ro_sign": detected_ro_sign,
-            "flip_phase": False,
+            "flip_phase": flip_phase,
             "from_seq": False,
             "ky_trajectory": None,
             "needs_resort": needs_resort,
@@ -648,6 +722,14 @@ def read_pulseq_params(seq_path: str) -> Dict[str, Any]:
 
         # Extract full ky trajectory: record ky at every ADC event.
         # Robust to pypulseq versions where rf.flip_angle is unavailable.
+        # An EXCITATION starts a new TR and resets ky to 0; only a REFOCUSING
+        # pulse mirrors it (ky -> -ky). Negating on every RF is refocusing logic
+        # and corrupts gradient-echo trains, where each TR begins with a fresh
+        # excitation: for a GRE that yielded 28/128 unique, non-monotonic ky.
+        # Spin echoes are unaffected because their net per-TR ky returns to zero
+        # before the next excitation, which makes negation and reset equivalent.
+        _exc_fa, _refoc_fa = _classify_rf_flip_angles(seq)
+        _can_classify = _exc_fa is not None
         _ky_accum = 0.0
         _rf_count = 0
         _ky_at_first_adc = None
@@ -655,13 +737,25 @@ def read_pulseq_params(seq_path: str) -> Dict[str, Any]:
         for _bidx in range(1, len(seq.block_events) + 1):
             try:
                 _blk = seq.get_block(_bidx)
-                _has_rf = bool(getattr(_blk, "rf", None))
+                _rf_obj = getattr(_blk, "rf", None)
+                _has_rf = bool(_rf_obj)
                 _has_adc = bool(getattr(_blk, "adc", None))
                 _gy = getattr(_blk, "gy", None)
                 if _has_rf:
                     _rf_count += 1
-                    if _rf_count >= 2:
-                        _ky_accum = -_ky_accum
+                    if not _can_classify:
+                        # No usable flip angles: keep the legacy behaviour rather
+                        # than guess on an exotic file.
+                        if _rf_count >= 2:
+                            _ky_accum = -_ky_accum
+                    else:
+                        _fa = _rf_flip_angle_deg(_rf_obj)
+                        _is_refoc = (
+                            _refoc_fa is not None
+                            and _fa is not None
+                            and abs(_fa - _refoc_fa) < abs(_fa - _exc_fa)
+                        )
+                        _ky_accum = -_ky_accum if _is_refoc else 0.0
                 if _gy is not None and hasattr(_gy, "area"):
                     _ky_accum += float(_gy.area)
                 if _has_adc:
@@ -1396,11 +1490,18 @@ def run_simulation_julia_batch(
 def remove_readout_oversampling_kspace(kspace: np.ndarray) -> np.ndarray:
     nP, nF_raw = kspace.shape
     nF = nF_raw // 2
-    img_os = np.fft.ifft(kspace, axis=1)
-    # ★ FIX: keep central half (not outer quarters)
+    # mapVBVD flagRemoveOS semantics: 2x readout oversampling doubles the
+    # ACQUIRED readout FOV (k_max and resolution are unchanged), so removal is
+    # a hybrid-domain crop of the central half of the FOV.  The 1-D transform
+    # must be centred, otherwise a centre-DC k-space maps the object onto the
+    # array edges and the "central half" crop keeps the periphery instead.
+    img_os = np.fft.fftshift(
+        np.fft.ifft(np.fft.ifftshift(kspace, axes=1), axis=1), axes=1)
+    # keep central half (not outer quarters)
     start = nF_raw // 4
     img_cropped = img_os[:, start:start + nF]
-    kspace_new = np.fft.fft(img_cropped, axis=1)
+    kspace_new = np.fft.fftshift(
+        np.fft.fft(np.fft.ifftshift(img_cropped, axes=1), axis=1), axes=1)
     print(f"  [OS removal] readout: {nF_raw} → {nF}")
     return kspace_new
 
