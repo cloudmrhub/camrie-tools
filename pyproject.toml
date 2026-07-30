@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "camrie-tools"
-version = "0.1.1"
+version = "1.1"
 description = "Python tools for CAMRIE, including the Koma MRI simulation pipeline."
 readme = "README.md"
 requires-python = ">=3.9"
