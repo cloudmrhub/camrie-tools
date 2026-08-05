@@ -1183,6 +1183,9 @@ def extract_phantom_for_slice(
 
     origin = np.array(rho_img.GetOrigin(), dtype=np.float64)
     spacing = np.array(rho_img.GetSpacing(), dtype=np.float64)
+    if np.max(np.abs(spacing)) < 0.1:  # meter-unit NIfTI: convert to mm
+        origin *= 1000.0
+        spacing *= 1000.0
     direction = np.array(rho_img.GetDirection(), dtype=np.float64).reshape(3, 3)
     size = np.array(rho_img.GetSize(), dtype=np.float64)
 
@@ -1648,6 +1651,18 @@ def reconstruct_from_kspace(
 # Volume Assembly
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
+def _normalise_sitk_to_mm(img):
+    """Return a copy of img with spacing/origin scaled to mm (handles meter-unit NIfTIs)."""
+    import numpy as _np
+    spacing = _np.array(img.GetSpacing())
+    if _np.max(_np.abs(spacing)) < 0.1:
+        img = sitk.Image(img)
+        img.SetSpacing((spacing * 1000.0).tolist())
+        img.SetOrigin((_np.array(img.GetOrigin()) * 1000.0).tolist())
+    return img
+
+
 def place_slice_in_body(recon, slice_spec, seq_fov_mm, slice_thickness_mm, body_ref):
     arr_3d = recon[None, :, :].astype(np.float32)
     img = sitk.GetImageFromArray(arr_3d)
@@ -1773,9 +1788,10 @@ def run_pipeline(
           f"FOV={seq_fov_mm[0]:.0f}x{seq_fov_mm[1]:.0f}mm, "
           f"matrix={matrix}, ST={slice_thickness_mm}mm")
 
-    rho_img = sitk.ReadImage(rho_path)
-    t1_img = sitk.ReadImage(t1_path)
-    t2_img = sitk.ReadImage(t2_path) if t2_path and os.path.exists(t2_path) else None
+    rho_img = _normalise_sitk_to_mm(sitk.ReadImage(rho_path))
+    t1_img  = _normalise_sitk_to_mm(sitk.ReadImage(t1_path))
+    t2_img  = (_normalise_sitk_to_mm(sitk.ReadImage(t2_path))
+               if t2_path and os.path.exists(t2_path) else None)
 
     slice_normal = normalize(np.array(slice_normal, dtype=np.float64))
     isocenter_mm = np.array(isocenter_mm, dtype=np.float64)
