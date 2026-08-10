@@ -1745,6 +1745,66 @@ def cleanup_intermediate_outputs(output_dir):
 # Main Pipeline
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
+def _apply_antialias_if_needed(rho_img, t1_img, t2_img, seq_fov_mm, matrix,
+                               slice_thickness_mm, spin_factor, slice_normal):
+    """
+    Apply Gaussian anti-aliasing to body model images when the spin grid
+    is finer than the body model voxels or when there is a rotation mismatch.
+
+    Returns (rho_img, t1_img, t2_img) smoothed, or None if no AA needed.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    spacing = np.array(rho_img.GetSpacing(), dtype=np.float64)
+    if np.max(np.abs(spacing)) < 0.1:  # meter-unit NIfTI
+        spacing = spacing * 1000.0
+    direction = np.array(rho_img.GetDirection(), dtype=np.float64).reshape(3, 3)
+
+    # Compute spin grid spacing
+    sf = max(int(spin_factor), 1)
+    resolution_mm = (seq_fov_mm[0] / matrix[1], seq_fov_mm[1] / matrix[0])
+    d_min = min(resolution_mm[0], resolution_mm[1], slice_thickness_mm)
+    spin_spacing_x = resolution_mm[0] / max(1, round(sf * resolution_mm[0] / d_min))
+    spin_spacing_y = resolution_mm[1] / max(1, round(sf * resolution_mm[1] / d_min))
+    spin_spacing_z = slice_thickness_mm / max(1, round(sf * slice_thickness_mm / d_min))
+
+    # Check direction mismatch between sequence grid and body model
+    slice_normal_arr = normalize(np.array(slice_normal, dtype=np.float64))
+    R = build_rotation_matrix(slice_normal_arr)
+    alignment = R @ direction
+    off_diagonal = np.sum(np.abs(alignment)) - np.abs(np.trace(alignment))
+    has_rotation = off_diagonal > 0.01
+
+    # Ratio of body model spacing to spin spacing per axis
+    ratio = np.array([spacing[0] / spin_spacing_x,
+                      spacing[1] / spin_spacing_y,
+                      spacing[2] / max(spin_spacing_z, 1e-6)])
+
+    needs_aa = np.any(ratio > 1.3) or has_rotation
+    if not needs_aa:
+        return None
+
+    # Sigma in voxel units: smooth just enough to suppress voxel edges
+    sigma_vox = np.clip(ratio * 0.4, 0.0, 1.5)
+    # sigma is in ZYX order for the numpy array
+    sigma_zyx = sigma_vox[::-1]
+
+    print(f"  [AA] Anti-aliasing body model (sigma_vox={sigma_vox.round(2)}, "
+          f"ratio={ratio.round(2)}, rotation_mismatch={has_rotation})")
+
+    def _smooth_img(img):
+        if img is None:
+            return None
+        arr = sitk.GetArrayFromImage(img).astype(np.float32)
+        arr = gaussian_filter(arr, sigma=sigma_zyx)
+        out = sitk.GetImageFromArray(arr)
+        out.CopyInformation(img)
+        return out
+
+    return _smooth_img(rho_img), _smooth_img(t1_img), _smooth_img(t2_img)
+
+
 def run_pipeline(
     rho_path, t1_path, t2_path, sequence_file, output_dir,
     isocenter_mm, slice_normal, num_slices,
@@ -1792,6 +1852,16 @@ def run_pipeline(
     t1_img  = _normalise_sitk_to_mm(sitk.ReadImage(t1_path))
     t2_img  = (_normalise_sitk_to_mm(sitk.ReadImage(t2_path))
                if t2_path and os.path.exists(t2_path) else None)
+
+    # ★ FIX #11: Anti-aliasing — smooth body model when spin grid is finer
+    # than body model voxels OR there is a direction mismatch (rotation).
+    # Without this, the coarse body-model voxel boundaries are resolved as
+    # visible lines/bands in the reconstructed image.
+    _aa_applied = _apply_antialias_if_needed(
+        rho_img, t1_img, t2_img, seq_fov_mm, matrix, slice_thickness_mm,
+        spin_factor, slice_normal)
+    if _aa_applied is not None:
+        rho_img, t1_img, t2_img = _aa_applied
 
     slice_normal = normalize(np.array(slice_normal, dtype=np.float64))
     isocenter_mm = np.array(isocenter_mm, dtype=np.float64)
@@ -1843,6 +1913,14 @@ def run_pipeline(
 
     valid_slices = [s for s in series_spec.slices if phantom_paths[s.index] is not None]
     print(f"\n{len(valid_slices)}/{num_slices} slices have spins")
+
+    if len(valid_slices) == 0:
+        msg = (
+            f"No spins found in any of the {num_slices} slices. "
+            f"Isocenter {isocenter_mm} may be outside the body model."
+        )
+        print(f"  ERROR: {msg}")
+        raise RuntimeError(msg)
 
     # Phase 2: Batch Julia simulation
     print(f"\n{'=' * 60}\nPhase 2: Batch simulation ({len(valid_slices)} slices)\n{'=' * 60}")
