@@ -1991,12 +1991,12 @@ def run_pipeline(
     sitk.WriteImage(volume, volume_path)
     print(f"  Reconstruction NIfTI: {volume_path}")
 
-    # ── K-space NIfTI (freq × phase × slices, 1 coil) ────────────────────
+    # ── K-space NIfTI (freq × phase × slices, complex64) ────────────────
     # Stack: each kspace_list[i] is complex64 (Np, Nf).
     # Resulting array shape: (Nslices, Np, Nf)  →  ITK size (Nf, Np, Nslices).
-    # We save real and imaginary parts as separate 3D NIfTIs with k-space
-    # spacing in 1/mm units so the geometry is physically meaningful.
-    print("\n--- Saving k-space NIfTIs ---")
+    # Saved as a single complex64 NIfTI — the viewer handles
+    # magnitude/real/imag/phase display.
+    print("\n--- Saving k-space NIfTI ---")
     try:
         n_valid = len(valid_slices)
         ks_stack = np.stack(
@@ -2016,22 +2016,15 @@ def run_pipeline(
         ks_spacing   = (dkf, dkp, dks)
         ks_direction = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
 
-        def _save_kspace_component(arr_zyx, suffix):
-            """Save a real float32 (Nslices, Np, Nf) array as NIfTI."""
-            sitk_img = sitk.GetImageFromArray(arr_zyx.astype(np.float32))
-            sitk_img.SetSpacing(ks_spacing)
-            sitk_img.SetOrigin(ks_origin)
-            sitk_img.SetDirection(ks_direction)
-            path = os.path.join(output_dir, f"kspace_{suffix}.nii.gz")
-            sitk.WriteImage(sitk_img, path)
-            print(f"  K-space {suffix} NIfTI: {path}  shape={arr_zyx.shape}")
-            return path
-
-        _save_kspace_component(np.real(ks_stack), "real")
-        _save_kspace_component(np.imag(ks_stack), "imag")
-        _save_kspace_component(np.abs(ks_stack),  "magnitude")
+        ks_img = sitk.GetImageFromArray(ks_stack)
+        ks_img.SetSpacing(ks_spacing)
+        ks_img.SetOrigin(ks_origin)
+        ks_img.SetDirection(ks_direction)
+        ks_path = os.path.join(output_dir, "kspace.nii.gz")
+        sitk.WriteImage(ks_img, ks_path)
+        print(f"  K-space complex NIfTI: {ks_path}  shape={ks_stack.shape}")
     except Exception as _ks_exc:
-        print(f"  WARNING: could not save k-space NIfTIs: {_ks_exc}")
+        print(f"  WARNING: could not save k-space NIfTI: {_ks_exc}")
 
     with open(os.path.join(output_dir, "series_spec.json"), "w") as f:
         json.dump(series_spec.to_dict(), f, indent=2)
