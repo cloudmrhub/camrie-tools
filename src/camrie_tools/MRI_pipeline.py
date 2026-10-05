@@ -1042,6 +1042,193 @@ def build_rotation_matrix(slice_normal: np.ndarray) -> np.ndarray:
     return np.stack([x_seq, y_seq, z_seq], axis=0)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Full-affine geometry (LPS mm, voxel-index -> world).
+#
+# ``build_rotation_matrix`` above derives readout/phase axes analytically from
+# only the slice normal, which is correct whenever no in-plane rotation was
+# prescribed but silently discards one when it was (the frontend's
+# ``angulation_z_deg`` control). The functions below accept the frontend's
+# full affine instead, so the prescribed readout/phase/slice basis is used
+# verbatim rather than re-derived. See AffineGeometryError for the validation
+# contract and ``series_geometry_from_affine`` for the entry point used by
+# ``compute_series_geometry(..., affine=...)``.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AffineGeometryError(ValueError):
+    """Raised when an explicit full-affine geometry prescription is invalid.
+
+    Covers: malformed affine, non-orthonormal direction, non-positive
+    spacing, and inconsistency between the affine and other explicit
+    geometry inputs (matrix, FOV, num_slices, slice_thickness_mm,
+    slice_gap_mm). Never silently discards shear or renormalises an invalid
+    affine into a different prescription — invalid input is rejected.
+    """
+
+
+def decompose_affine(affine: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Decompose a 4x4 (or 3x4) voxel-index-to-LPS-mm affine.
+
+    Returns ``(spacing, direction, origin)`` where:
+      spacing   = norm(A[:3, :3], axis=0)           -- per-column mm/voxel
+      direction = A[:3, :3] / spacing                -- orthonormal column basis
+      origin    = A[:3, 3]                            -- world position of voxel (0,0,0)
+
+    Raises AffineGeometryError if ``affine`` is not finite, not 4x4 (or 3x4
+    with an implied [0,0,0,1] last row), does not have a valid homogeneous
+    last row, has a non-positive column spacing, or its direction matrix is
+    not orthonormal (right- or left-handed, both accepted and reported).
+    """
+    A = np.asarray(affine, dtype=np.float64)
+    if A.shape == (3, 4):
+        A = np.vstack([A, [0.0, 0.0, 0.0, 1.0]])
+    if A.shape != (4, 4):
+        raise AffineGeometryError(
+            f"affine must be a 4x4 (or 3x4) matrix, got shape {A.shape}")
+    if not np.all(np.isfinite(A)):
+        raise AffineGeometryError("affine contains non-finite values (NaN/Inf)")
+    last_row = A[3, :]
+    if not np.allclose(last_row, [0.0, 0.0, 0.0, 1.0], atol=1e-6):
+        raise AffineGeometryError(
+            f"affine last row must be [0, 0, 0, 1] for a valid homogeneous "
+            f"transform, got {last_row.tolist()}")
+
+    linear = A[:3, :3]
+    spacing = np.linalg.norm(linear, axis=0)
+    if np.any(spacing <= 1e-9):
+        raise AffineGeometryError(
+            f"affine columns must have positive spacing, got {spacing.tolist()}")
+
+    direction = linear / spacing[np.newaxis, :]
+    gram = direction.T @ direction
+    if not np.allclose(gram, np.eye(3), atol=1e-4):
+        raise AffineGeometryError(
+            "affine direction matrix (columns normalised) is not orthonormal "
+            f"(RᵗR deviates from I by {np.max(np.abs(gram - np.eye(3))):.2e}); "
+            "shear or a non-rigid prescription is not supported")
+
+    det = np.linalg.det(direction)
+    if abs(abs(det) - 1.0) > 1e-3:
+        raise AffineGeometryError(f"affine direction matrix has |det|={abs(det):.6f}, expected 1")
+    # Both handedness are accepted (LPS stacks can be acquired either way);
+    # record it on the resulting SeriesSpec rather than rejecting it.
+
+    origin = A[:3, 3]
+    return spacing, direction, origin
+
+
+def _affine_consistency_errors(
+    spacing: np.ndarray, num_slices: int,
+    matrix: Optional[Tuple[int, int]], fov_mm: Optional[Tuple[float, float]],
+    slice_thickness_mm: Optional[float], slice_gap_mm: Optional[float],
+    atol_mm: float = 0.05,
+) -> List[str]:
+    """Cross-check the affine-derived spacing against other explicit inputs.
+
+    Returns a list of human-readable error strings (empty if consistent).
+    Any explicit input that conflicts with the affine by more than
+    ``atol_mm`` (or, for matrix, by a non-integer voxel count) is reported;
+    the caller raises with all conflicts listed together.
+    """
+    errors: List[str] = []
+    dx, dy, dz = float(spacing[0]), float(spacing[1]), float(spacing[2])
+
+    if fov_mm is not None:
+        if matrix is not None:
+            nP, nF = int(matrix[0]), int(matrix[1])  # tools convention: (nP, nF) = (Ny, Nx)
+            expected_fov = (nF * dx, nP * dy)
+            if (abs(expected_fov[0] - fov_mm[0]) > atol_mm or
+                    abs(expected_fov[1] - fov_mm[1]) > atol_mm):
+                errors.append(
+                    f"fov_mm={tuple(fov_mm)} is inconsistent with affine spacing "
+                    f"{(dx, dy)} mm/voxel and matrix={matrix}: expected fov_mm "
+                    f"~{expected_fov} mm")
+
+    thickness_gap = (slice_thickness_mm or 0.0) + (slice_gap_mm or 0.0)
+    if slice_thickness_mm is not None and num_slices > 1:
+        if abs(thickness_gap - dz) > atol_mm:
+            errors.append(
+                f"slice_thickness_mm + slice_gap_mm = {thickness_gap} mm does not "
+                f"match the affine's slice-axis spacing {dz} mm (column 2 norm); "
+                f"the affine's dz is the authoritative center-to-center spacing")
+
+    return errors
+
+
+def series_geometry_from_affine(
+    affine: np.ndarray, num_slices: int,
+    matrix: Optional[Tuple[int, int]] = None,
+    fov_mm: Optional[Tuple[float, float]] = None,
+    seq_fov_mm: Optional[Tuple[float, float]] = None,
+    slice_thickness_mm: Optional[float] = None,
+    slice_gap_mm: Optional[float] = None,
+) -> "SeriesSpec":
+    """Build a SeriesSpec directly from a full voxel-index-to-LPS-mm affine.
+
+    Precedence: when ``affine`` is given, it is authoritative for direction,
+    spacing (dx, dy, dz), and per-slice placement. ``slice_thickness_mm``,
+    ``slice_gap_mm``, and ``fov_mm``/``matrix`` are optional *consistency
+    checks*, not independent inputs — if provided they must agree with the
+    affine within tolerance (``_affine_consistency_errors``) or an
+    AffineGeometryError is raised rather than silently preferring one source
+    over the other.
+
+    Slice k's physical center is ``affine @ [(Nx-1)/2, (Ny-1)/2, k, 1]``
+    (continuous in-plane center, discrete slice index), matching the
+    sequence-geometry convention used to build the affine on the frontend.
+    """
+    spacing, direction, origin = decompose_affine(affine)
+    dx, dy, dz = float(spacing[0]), float(spacing[1]), float(spacing[2])
+
+    conflicts = _affine_consistency_errors(
+        spacing, num_slices, matrix, fov_mm, slice_thickness_mm, slice_gap_mm)
+    if conflicts:
+        raise AffineGeometryError(
+            "affine geometry conflicts with explicit input(s): " + "; ".join(conflicts))
+
+    if matrix is not None:
+        nP, nF = int(matrix[0]), int(matrix[1])
+        nx, ny = nF, nP
+    elif fov_mm is not None:
+        nx, ny = None, None
+    else:
+        nx, ny = None, None
+
+    # In-plane center index used by the frontend affine (grid midpoint, not
+    # voxel (0,0,0)); fall back to the matrix-implied size when available.
+    half_i = (nx - 1) / 2.0 if nx is not None else 0.0
+    half_j = (ny - 1) / 2.0 if ny is not None else 0.0
+
+    R_body_to_seq = direction.T  # world mm -> (row, col, slice) sequence components
+    slice_normal = direction[:, 2]
+
+    resolved_thickness = slice_thickness_mm if slice_thickness_mm is not None else dz
+    resolved_gap = slice_gap_mm if slice_gap_mm is not None else max(0.0, dz - resolved_thickness)
+
+    resolved_fov_mm = tuple(fov_mm) if fov_mm is not None else (
+        (nF * dx, nP * dy) if matrix is not None else (dx, dy))
+    resolved_seq_fov_mm = tuple(seq_fov_mm) if seq_fov_mm is not None else resolved_fov_mm
+
+    slices: List[SliceSpec] = []
+    for k in range(num_slices):
+        center = (direction * spacing[np.newaxis, :]) @ np.array([half_i, half_j, float(k)]) + origin
+        slices.append(SliceSpec(
+            normal=slice_normal, center_mm=center,
+            position_along_normal=float(np.dot(center, slice_normal)),
+            R_body_to_seq=R_body_to_seq, index=k))
+
+    # isocenter_mm reported on the SeriesSpec is the center of the slice
+    # stack (k at the stack midpoint), consistent with the normal-only path
+    # where isocenter_mm is the caller-supplied series center.
+    mid_k = (num_slices - 1) / 2.0
+    isocenter_mm = (direction * spacing[np.newaxis, :]) @ np.array([half_i, half_j, mid_k]) + origin
+
+    return SeriesSpec(
+        isocenter_mm=isocenter_mm, slice_normal=slice_normal, R_body_to_seq=R_body_to_seq,
+        slices=slices, fov_mm=resolved_fov_mm, seq_fov_mm=resolved_seq_fov_mm,
+        slice_thickness_mm=resolved_thickness)
+
+
 @dataclass
 class SliceSpec:
     normal: np.ndarray
@@ -1086,7 +1273,28 @@ class SeriesSpec:
 def compute_series_geometry(
     isocenter_mm, slice_normal, num_slices, slice_thickness_mm,
     slice_gap_mm=0.0, fov_mm=(200.0, 200.0), seq_fov_mm=(300.0, 300.0),
+    affine=None, matrix=None,
 ) -> SeriesSpec:
+    """Compute per-slice placement geometry for a series.
+
+    Default (legacy) path: ``slice_normal`` only. In-plane readout/phase
+    axes are derived analytically by ``build_rotation_matrix`` and any
+    in-plane rotation the caller may have prescribed is not representable —
+    this path is unchanged and exists for backward compatibility.
+
+    Full-affine path: pass ``affine`` (a 4x4 voxel-index-to-LPS-mm matrix,
+    see ``decompose_affine``) to use the caller's exact readout/phase/slice
+    basis instead of a derived one. ``slice_normal`` is ignored in this case
+    (the affine's third column is authoritative); ``isocenter_mm`` is also
+    ignored (the affine's origin/translation is authoritative). ``matrix``,
+    if given, is cross-validated against the affine's spacing and must use
+    the tools' existing ``(nP, nF)`` = ``(Ny, Nx)`` convention.
+    """
+    if affine is not None:
+        return series_geometry_from_affine(
+            affine, num_slices, matrix=matrix, fov_mm=fov_mm, seq_fov_mm=seq_fov_mm,
+            slice_thickness_mm=slice_thickness_mm, slice_gap_mm=slice_gap_mm)
+
     slice_normal = normalize(np.array(slice_normal, dtype=np.float64))
     isocenter_mm = np.array(isocenter_mm, dtype=np.float64)
     R = build_rotation_matrix(slice_normal)
@@ -1663,7 +1871,14 @@ def _normalise_sitk_to_mm(img):
     return img
 
 
-def place_slice_in_body(recon, slice_spec, seq_fov_mm, slice_thickness_mm, body_ref):
+def _slice_image_native(recon, slice_spec, seq_fov_mm, slice_thickness_mm):
+    """Build the single-slice SITK image at its own native in-plane resolution.
+
+    Shared by ``place_slice_in_body`` (which resamples the result onto the
+    body grid) and the sequence-grid assembly path (which does not resample
+    at all). Spacing/direction/origin are derived from ``slice_spec`` only —
+    no body-model information is used here.
+    """
     arr_3d = recon[None, :, :].astype(np.float32)
     img = sitk.GetImageFromArray(arr_3d)
     nx, ny = recon.shape[1], recon.shape[0]
@@ -1673,10 +1888,21 @@ def place_slice_in_body(recon, slice_spec, seq_fov_mm, slice_thickness_mm, body_
     corner_seq = np.array([-seq_fov_mm[0] / 2, -seq_fov_mm[1] / 2, 0.0])
     corner_body = R_inv @ corner_seq + slice_spec.center_mm
     img.SetOrigin(tuple(corner_body.tolist()))
+    return img
+
+
+def place_slice_in_body(recon, slice_spec, seq_fov_mm, slice_thickness_mm, body_ref):
+    """Legacy/compatibility path: resample the slice onto the body model grid.
+
+    Unchanged behavior. Kept as the default so existing callers that rely on
+    "reconstruction.nii.gz shares body_ref's grid" are unaffected.
+    """
+    img = _slice_image_native(recon, slice_spec, seq_fov_mm, slice_thickness_mm)
     return sitk.Resample(img, body_ref, sitk.Transform(), sitk.sitkLinear, 0.0, sitk.sitkFloat32)
 
 
 def assemble_volume(slices, body_ref):
+    """Legacy/compatibility path: average overlapping resampled slices on body_ref's grid."""
     assembled = sitk.Image(body_ref.GetSize(), sitk.sitkFloat32)
     assembled.CopyInformation(body_ref)
     weight = sitk.Image(body_ref.GetSize(), sitk.sitkFloat32)
@@ -1685,6 +1911,118 @@ def assemble_volume(slices, body_ref):
         assembled = assembled + sl
         weight = weight + sitk.Cast(sl > 0, sitk.sitkFloat32)
     return sitk.Divide(assembled, sitk.Maximum(weight, 1e-6))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Sequence-grid (native) assembly — no resampling, no averaging.
+#
+# place_slice_in_body/assemble_volume above resample every slice onto the
+# body model's voxel grid and average overlaps, which both destroys the
+# sequence's own in-plane resolution (e.g. 192x128 becomes whatever the body
+# grid has) and discards slices that fall between body-grid planes. The
+# functions below instead allocate a volume shaped exactly like the acquired
+# series ([Nz, Ny, Nx], at the sequence's own resolution and slice spacing)
+# and copy each reconstructed slice array into its index verbatim.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SequenceGridAssemblyError(ValueError):
+    """Raised when sequence-grid packing cannot proceed safely.
+
+    Covers reconstructed-slice shape mismatches against the prescribed
+    matrix (after oversampling removal/cropping) that would otherwise force
+    a silent resize, and other prescription/acquisition inconsistencies that
+    would produce misleading geometry if packed anyway.
+    """
+
+
+def assemble_native_grid_volume(
+    recon_by_index: Dict[int, Optional[np.ndarray]],
+    series_spec: "SeriesSpec", num_slices: int,
+) -> sitk.Image:
+    """Pack per-slice reconstructions into one volume on the sequence's own grid.
+
+    ``recon_by_index`` maps slice index -> 2-D numpy array (numpy shape
+    ``(Ny, Nx)``, the tools' existing convention) or ``None`` for a slice
+    that was skipped (no spins) or failed. No resampling, rotation, display
+    flip, or cross-slice averaging is performed: each array is written
+    verbatim into plane ``k`` of a ``[Nz, Ny, Nx]`` volume. Skipped/failed
+    slices are left as zero in their own plane; later slice indices are not
+    shifted to fill the gap. Legitimate zero-valued pixels inside a packed
+    slice are preserved (there is no "zero means empty" postprocessing on
+    valid planes).
+
+    Spacing/direction/origin on the returned image come from
+    ``series_spec`` (dx, dy from the first available slice's spacing; dz
+    from the series' slice-center spacing; direction/origin from the
+    series' affine-derived or normal-derived basis), not from the body
+    model — this is the key difference from ``place_slice_in_body`` /
+    ``assemble_volume``.
+
+    Raises SequenceGridAssemblyError if any present slice's array shape does
+    not match the other present slices (a real prescription/acquisition
+    mismatch must be rejected rather than silently resized).
+    """
+    present = [(k, arr) for k, arr in recon_by_index.items() if arr is not None]
+    if not present:
+        raise SequenceGridAssemblyError(
+            "assemble_native_grid_volume: no reconstructed slices available to pack")
+
+    ny, nx = present[0][1].shape
+    for k, arr in present:
+        if arr.shape != (ny, nx):
+            raise SequenceGridAssemblyError(
+                f"slice {k} has reconstructed shape {arr.shape}, expected {(ny, nx)} "
+                "(matches other slices in this series); refusing to resize into the "
+                "sequence grid silently -- this indicates a prescription/acquisition "
+                "mismatch that must be fixed upstream")
+
+    volume = np.zeros((num_slices, ny, nx), dtype=np.float32)
+    for k, arr in present:
+        if not (0 <= k < num_slices):
+            raise SequenceGridAssemblyError(
+                f"slice index {k} is out of range for num_slices={num_slices}")
+        volume[k, :, :] = arr.astype(np.float32, copy=False)
+
+    img = sitk.GetImageFromArray(volume)
+
+    dx = series_spec.seq_fov_mm[0] / nx
+    dy = series_spec.seq_fov_mm[1] / ny
+    if num_slices > 1:
+        centers = np.array([s.position_along_normal for s in series_spec.slices])
+        spacings = np.diff(np.sort(centers))
+        dz = float(np.median(spacings)) if spacings.size else series_spec.slice_thickness_mm
+        dz = abs(dz) if abs(dz) > 1e-9 else series_spec.slice_thickness_mm
+    else:
+        dz = series_spec.slice_thickness_mm
+    img.SetSpacing((dx, dy, dz))
+
+    R_inv = series_spec.R_body_to_seq.T  # sequence axes (row, col, slice) -> world mm
+    img.SetDirection(tuple(R_inv.flatten(order="C").tolist()))
+
+    # Voxel-center convention (matches SimpleITK/NIfTI and the frontend's
+    # affine, both of which treat continuous index i as the CENTER of voxel
+    # i): the origin (physical position of voxel index 0) is the slice
+    # center minus (N-1)/2 voxels along each in-plane axis, so that
+    # continuous index (nx-1)/2, (ny-1)/2 lands exactly on center_mm.
+    #
+    # _slice_image_native (legacy path) instead places the origin at
+    # -FOV/2, which is the FOV's geometric edge, not voxel 0's center; for
+    # FOV == N*spacing this is off from the voxel-center origin by exactly
+    # -spacing/2 along each in-plane axis (confirmed numerically: corner =
+    # -fov/2 => continuous-index-(N-1)/2 physical point = -spacing/2, not
+    # 0). That legacy formula is left unchanged for compatibility (see
+    # place_slice_in_body); it is not reused here because this is new code
+    # for which there is no "existing behavior" to preserve, and the
+    # sequence-grid path's physical-placement tests (Phase 1D, test 3)
+    # specifically check sub-micron agreement against A @ [i, j, k, 1].
+    first_slice = series_spec.slices[0]
+    half_i = (nx - 1) / 2.0
+    half_j = (ny - 1) / 2.0
+    corner_seq = np.array([-half_i * dx, -half_j * dy, 0.0])
+    corner_body = R_inv @ corner_seq + first_slice.center_mm
+    img.SetOrigin(tuple(corner_body.tolist()))
+
+    return img
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1817,8 +2155,41 @@ def run_pipeline(
     use_hdf5=True, spins_per_voxel=0, spin_method=DEFAULT_SPIN_METHOD,
     flip_phase_override=None, final_nifti_path=None, debug=False,
     phase_reorder_override=False, simT2s=False, spin_axes='xy', 
-    t2star_factor=1.0,
+    t2star_factor=1.0, affine=None, output_grid="body",
 ):
+    """Run the full phantom-extraction -> simulation -> reconstruction pipeline.
+
+    Geometry inputs
+    ---------------
+    slice_normal / isocenter_mm : legacy path (default). In-plane
+        readout/phase axes are derived analytically from the normal
+        (``build_rotation_matrix``); any in-plane rotation is not
+        representable here. Unchanged behavior.
+    affine : optional full voxel-index-to-LPS-mm 4x4 (or 3x4) matrix. When
+        given, it is authoritative for direction, spacing, and per-slice
+        placement -- the prescribed readout/phase/slice basis (including
+        any in-plane rotation) is used verbatim instead of being re-derived
+        from the normal alone. ``slice_normal``/``isocenter_mm`` are ignored
+        in this case. See ``series_geometry_from_affine`` for validation and
+        precedence rules against ``matrix``/``fov_mm``/``slice_thickness_mm``/
+        ``slice_gap_mm``.
+
+    output_grid : "body" (default) | "sequence"
+        "body" (legacy/compatibility): each slice is resampled onto the body
+            model's voxel grid and overlapping slices are averaged
+            (``place_slice_in_body`` / ``assemble_volume``), unchanged.
+        "sequence": the output volume is allocated at the sequence's own
+            resolution and slice spacing ([Nz, Ny, Nx]); each reconstructed
+            slice is copied verbatim into its prescribed index with no
+            resampling, rotation, flipping, or cross-slice averaging
+            (``assemble_native_grid_volume``). Use this for the full-affine
+            path so the reconstructed NIfTI preserves the sequence's own
+            resolution/orientation/spacing rather than the body model's.
+        This argument's existing default is unchanged, so callers that do
+        not pass it keep today's body-grid behavior exactly.
+    """
+    if output_grid not in ("body", "sequence"):
+        raise ValueError(f"output_grid must be 'body' or 'sequence', got {output_grid!r}")
     os.makedirs(output_dir, exist_ok=True)
     seq_params = read_sequence_params(sequence_file)
 
@@ -1853,22 +2224,32 @@ def run_pipeline(
     t2_img  = (_normalise_sitk_to_mm(sitk.ReadImage(t2_path))
                if t2_path and os.path.exists(t2_path) else None)
 
+    if affine is not None:
+        # Full-affine path: derive the normal from the affine for the
+        # anti-alias direction-mismatch check below (build_rotation_matrix
+        # is only used for that heuristic here, not for slice placement).
+        _aa_direction = decompose_affine(affine)[1]
+        _aa_normal = _aa_direction[:, 2]
+    else:
+        _aa_normal = slice_normal
+
     # ★ FIX #11: Anti-aliasing — smooth body model when spin grid is finer
     # than body model voxels OR there is a direction mismatch (rotation).
     # Without this, the coarse body-model voxel boundaries are resolved as
     # visible lines/bands in the reconstructed image.
     _aa_applied = _apply_antialias_if_needed(
         rho_img, t1_img, t2_img, seq_fov_mm, matrix, slice_thickness_mm,
-        spin_factor, slice_normal)
+        spin_factor, _aa_normal)
     if _aa_applied is not None:
         rho_img, t1_img, t2_img = _aa_applied
 
-    slice_normal = normalize(np.array(slice_normal, dtype=np.float64))
-    isocenter_mm = np.array(isocenter_mm, dtype=np.float64)
+    if affine is None:
+        slice_normal = normalize(np.array(slice_normal, dtype=np.float64))
+        isocenter_mm = np.array(isocenter_mm, dtype=np.float64)
 
     series_spec = compute_series_geometry(
         isocenter_mm, slice_normal, num_slices, slice_thickness_mm,
-        slice_gap_mm, fov_mm, seq_fov_mm)
+        slice_gap_mm, fov_mm, seq_fov_mm, affine=affine, matrix=matrix)
 
     rotation_json = os.path.join(output_dir, "rotation.json")
     with open(rotation_json, "w") as f:
@@ -1943,6 +2324,10 @@ def run_pipeline(
         ax.set_title(f"Slice {s.index}")
         fig.savefig(os.path.join(output_dir, f"recon_{s.index:03d}.png"), dpi=100)
         plt.close(fig)
+        if output_grid == "sequence":
+            # Sequence-grid path packs the raw reconstructed array directly
+            # (assemble_native_grid_volume); no per-slice SITK placement.
+            return None
         # Pass UNFLIPPED recon to placement
         return place_slice_in_body(recon, s, seq_fov_mm, slice_thickness_mm, rho_img)
 
@@ -1986,7 +2371,11 @@ def run_pipeline(
 
     # Assemble reconstruction volume
     print("\n--- Assembling volume ---")
-    volume = assemble_volume(recon_sitk, rho_img)
+    if output_grid == "sequence":
+        recon_by_index = {s.index: recon_images[i] for i, s in enumerate(valid_slices)}
+        volume = assemble_native_grid_volume(recon_by_index, series_spec, num_slices)
+    else:
+        volume = assemble_volume(recon_sitk, rho_img)
     volume_path = os.path.join(output_dir, "reconstruction.nii.gz")
     sitk.WriteImage(volume, volume_path)
     print(f"  Reconstruction NIfTI: {volume_path}")
