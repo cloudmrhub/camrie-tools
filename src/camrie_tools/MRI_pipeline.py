@@ -2143,6 +2143,50 @@ def _apply_antialias_if_needed(rho_img, t1_img, t2_img, seq_fov_mm, matrix,
     return _smooth_img(rho_img), _smooth_img(t1_img), _smooth_img(t2_img)
 
 
+def _affine_for_matrix(affine, prescribed_matrix, actual_matrix, fov_mm):
+    """Re-derive an affine's in-plane spacing for the matrix the sequence really has.
+
+    Keeps the direction columns, the slice column and the physical centre of
+    the prescribed grid; sets in-plane spacing to FOV / actual matrix.
+    Matrices use the tools convention (nP, nF) = (Ny, Nx).
+    """
+    A = np.array(affine, dtype=np.float64)
+    if A.shape == (3, 4):
+        A = np.vstack([A, [0.0, 0.0, 0.0, 1.0]])
+    ny0, nx0 = int(prescribed_matrix[0]), int(prescribed_matrix[1])
+    ny1, nx1 = int(actual_matrix[0]), int(actual_matrix[1])
+    sp = np.linalg.norm(A[:3, :3], axis=0)
+    dirs = A[:3, :3] / sp
+    centre = A[:3, :3] @ np.array([(nx0 - 1) / 2.0, (ny0 - 1) / 2.0, 0.0]) + A[:3, 3]
+    new = A.copy()
+    new[:3, 0] = dirs[:, 0] * (fov_mm[0] / nx1)
+    new[:3, 1] = dirs[:, 1] * (fov_mm[1] / ny1)
+    new[:3, 3] = centre - new[:3, :3] @ np.array([(nx1 - 1) / 2.0, (ny1 - 1) / 2.0, 0.0])
+    return new
+
+
+def _configure_sequence(sequence_file, matrix, seq_fov_mm, output_dir):
+    """Try to re-prescribe a Pulseq template to ``matrix``/``seq_fov_mm``.
+
+    Returns (new_sequence_file, report). On an unsupported template returns
+    (sequence_file, report) with report["mode"] == "as_is" and the reason.
+    """
+    from .sequence_matrix import SequenceRebuildError, rebuild_pulseq_matrix
+
+    native_ok = str(sequence_file).lower().endswith(".seq")
+    if not native_ok:
+        return sequence_file, {"mode": "as_is", "reason": "only Pulseq .seq templates can be configured"}
+    out = os.path.join(output_dir, "configured_sequence.seq")
+    try:
+        info = rebuild_pulseq_matrix(
+            sequence_file, out, nx=int(matrix[1]), ny=int(matrix[0]),
+            fov_x_mm=float(seq_fov_mm[0]), fov_y_mm=float(seq_fov_mm[1]))
+    except (NotImplementedError, SequenceRebuildError) as exc:
+        return sequence_file, {"mode": "as_is", "reason": str(exc)}
+    return out, {"mode": "configured", **{k: (float(v) if isinstance(v, (int, float, np.floating)) else v)
+                                          for k, v in info.items()}}
+
+
 def run_pipeline(
     rho_path, t1_path, t2_path, sequence_file, output_dir,
     isocenter_mm, slice_normal, num_slices,
@@ -2155,7 +2199,7 @@ def run_pipeline(
     use_hdf5=True, spins_per_voxel=0, spin_method=DEFAULT_SPIN_METHOD,
     flip_phase_override=None, final_nifti_path=None, debug=False,
     phase_reorder_override=False, simT2s=False, spin_axes='xy', 
-    t2star_factor=1.0, affine=None, output_grid="body",
+    t2star_factor=1.0, affine=None, output_grid="body", configure_sequence=False,
 ):
     """Run the full phantom-extraction -> simulation -> reconstruction pipeline.
 
@@ -2197,6 +2241,29 @@ def run_pipeline(
         seq_fov_mm = tuple(seq_params["fov_mm"])
     if matrix is None:
         matrix = (seq_params["nP"], seq_params["nF"])
+
+    # Sequence as template: the requested matrix/FOV are applied to the file
+    # (scanner-style) when supported; otherwise the file runs as-is and the
+    # geometry is derived from the file's own matrix. Off by default, so
+    # existing callers are unchanged.
+    sequence_report = {"mode": "native"}
+    if configure_sequence:
+        native = (int(seq_params["nP"]), int(seq_params["nF"]))
+        prescribed = (int(matrix[0]), int(matrix[1]))
+        if prescribed != native:
+            sequence_file, sequence_report = _configure_sequence(
+                sequence_file, prescribed, seq_fov_mm, output_dir)
+            sequence_report.update(prescribed_matrix=list(prescribed), native_matrix=list(native))
+            if sequence_report["mode"] == "configured":
+                seq_params = read_sequence_params(sequence_file)
+            else:
+                print(f"  [sequence] running as-is at native matrix {native}: {sequence_report['reason']}")
+                if affine is not None:
+                    affine = _affine_for_matrix(affine, prescribed, native, seq_fov_mm)
+                matrix = native
+            sequence_report["effective_matrix"] = [int(seq_params["nP"]), int(seq_params["nF"])]
+        with open(os.path.join(output_dir, "sequence_report.json"), "w") as f:
+            json.dump(sequence_report, f, indent=2)
     oversampling = seq_params.get("oversampling", 1)
     orientation = seq_params.get("orientation")
 
